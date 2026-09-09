@@ -2,7 +2,7 @@
 // Regenerates conformance/trajectory/*/expected-report.json from each vector's golden.jsonl,
 // actual.jsonl, and case.json (comparison options). Run after any change to trajectory
 // comparison semantics that's an *intentional* behavior change; a diff in the output otherwise
-// means something regressed. See LLD v0.2 §20 "Conformance".
+// means something regressed.
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";

@@ -32,8 +32,7 @@ jobs:
       - name: Test
         run: npm test
 
-      # Trajectory Gate dogfood (LLD v0.2 §20): gates a deterministic example agent against a
-      # committed golden on every PR, exercising the exact `deja gate` workflow the README
-      # documents -- not a mocked stand-in for it.
+      # Gates a deterministic example agent against a committed golden on every PR, exercising
+      # the exact `deja gate` workflow the README documents -- not a mocked stand-in for it.
       - name: Dogfood deja gate
         run: node dist/cli.js gate examples/gate-dogfood/golden.jsonl -- node examples/gate-dogfood/agent.cjs

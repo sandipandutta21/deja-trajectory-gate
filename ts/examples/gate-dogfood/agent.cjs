@@ -1,7 +1,7 @@
 // A deliberately deterministic stand-in for a real agent, so deja's own CI can gate it on
-// every PR (LLD v0.2 §20 "Dogfood") without depending on a live LLM. It exercises exactly the
-// workflow documented in the README's "Trajectory Gate" section: read DEJA_MCP_URL, make the
-// same two calls every time, exit 0.
+// every PR without depending on a live LLM. It exercises exactly the workflow documented in
+// the README's "Trajectory Gate" section: read DEJA_MCP_URL, make the same two calls every
+// time, exit 0.
 async function call(url, id, method, params) {
     const res = await fetch(url, {
         method: "POST",

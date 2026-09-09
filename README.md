@@ -1,14 +1,16 @@
-# deja
+# deja-trajectory-gate
 
 **Replay the environment. Gate the agent.**
 
-deja replays an agent's environment, not the agent: freeze a recorded MCP world, run a changed
-model, prompt, rule, or tool against it, and fail CI when the resulting trajectory of tool calls
-diverges from what you approved.
+Freeze a recorded MCP world, run a changed model, prompt, rule, or tool against it, and fail CI
+when the resulting trajectory of tool calls diverges from what you approved. That's the whole
+job: not "did the agent's trace look reasonable," but "does it still do what the last approved
+version did, against the exact same environment."
 
-Under the hood, it's a full [MCP](https://modelcontextprotocol.io) record/replay proxy — the
-cassette is a plain, inspectable JSONL artifact you can also use standalone, independent of
-Trajectory Gate.
+This project grew out of [deja](https://github.com/sandipandutta21/deja), an MCP record/replay
+VCR — the cassette format and the matching engine underneath are the same byte-compatible
+artifact, tested the same way. This repository is where that Trajectory Gate work is now
+maintained on its own, separate from deja's general-purpose record/replay history.
 
 ```text
 The cassette is open.
@@ -34,8 +36,8 @@ reconstruct the environment a *different* agent needs to make real decisions aga
 record/replay tools solve the opposite half: they can replay an identical client, but stop there
 — no trajectory comparison, no CI gate.
 
-deja does both, from one artifact: capture the MCP wire once, replay that frozen world for a
-changed agent, then align and gate the trajectory it actually produced. Comparison is
+Trajectory Gate does both, from one artifact: capture the MCP wire once, replay that frozen world
+for a changed agent, then align and gate the trajectory it actually produced. Comparison is
 deterministic by default — no LLM judge required, no vendor owns what "equivalent" means — with
 an optional judge only as a tiebreaker inside a narrow uncertainty band.
 
@@ -43,9 +45,9 @@ That replay still has to survive a non-deterministic client: the same *intent* (
 file") can arrive as structurally different JSON-RPC calls between runs. A naive VCR either
 matches too strictly (the recording rots the moment an agent phrases a call slightly
 differently) or too loosely (a fuzzy matcher risks confidently returning the wrong tool's
-content for a request that only looks similar). deja's matching tier ladder — exact → structural
-→ deterministic semantic similarity — with hard safety gates against exactly that failure mode,
-is what makes the replay trustworthy enough to gate on.
+content for a request that only looks similar). The matching tier ladder — exact → structural →
+deterministic semantic similarity — with hard safety gates against exactly that failure mode, is
+what makes the replay trustworthy enough to gate on.
 
 ## Highlights
 
@@ -55,8 +57,10 @@ is what makes the replay trustworthy enough to gate on.
   `DEJA_MCP_URL`, capture, compare) in one command. Comparison modes: `strict`, `unordered`,
   `subset`, `superset`, and `policy` (explicit required/prohibited/optional steps). A replay miss
   establishes a divergence frontier — downstream observations are reported as consequences of it,
-  not independent regressions. Safe `--update` promotes a captured session to a new golden only
-  when there were zero replay misses.
+  not independent regressions. `strict` mode also classifies genuine reorders (two calls that
+  just swapped position) as a distinct outcome instead of a disconnected missing+added pair.
+  Safe `--update` promotes a captured session to a new golden only when there were zero replay
+  misses.
 - **Recording**: transparent stdio proxy or Streamable HTTP proxy (SSE and pre-2025 batch
   arrays included); captures the full wire, including server-initiated traffic (notifications,
   sampling, elicitation); secret redaction on by default (GitHub/`sk-`/Slack/AWS/JWT/Bearer/
@@ -76,8 +80,9 @@ is what makes the replay trustworthy enough to gate on.
   fields); `deja redact --scan` is a CI tripwire against committing an unredacted fixture.
 - **Native test integrations**: `withGate()` and a zero-config `useCassette()` Vitest fixture on
   the TS side; a JUnit 5 `@Cassette` extension on the Java side that lets the official MCP Java
-  SDK's `McpClient` run **unmodified** against a cassette, with `DEJA_MODE=record` re-recording
-  the identical test code against a real server.
+  SDK's `McpClient` run **unmodified** against a cassette, with `gate = true` gating the same way
+  `withGate()` does and `DEJA_MODE=record` re-recording the identical test code against a real
+  server.
 - **Validated against real servers**, not just fixtures: both implementations are tested
   directly against the official MCP reference servers (`server-everything`,
   `server-filesystem`), which is how several of the correctness fixes in this codebase were
@@ -86,11 +91,13 @@ is what makes the replay trustworthy enough to gate on.
 ## Repository layout
 
 ```
-deja/
+deja-trajectory-gate/
 ├── ts/            TypeScript implementation: CLI (deja record/replay/verify/diff/redact/
 │                  trajectory/gate) + library + Vitest integration
-├── java/          Java implementation: deja-core (native engine) + deja-junit5
-│                  (JUnit 5 @Cassette extension), a Gradle multi-module build
+├── java/          Java implementation: deja-core (native engine), deja-junit5 (JUnit 5
+│                  @Cassette extension), and cli (the trajectory/gate CLI for Java --
+│                  record/replay/verify/diff/redact CLI parity remains TS-only), a Gradle
+│                  multi-module build
 ├── conformance/   Cassette fixtures shared by both test suites, proving the two
 │                  implementations read and write byte-compatible files, plus the
 │                  Trajectory Gate comparison vectors (conformance/trajectory/)
@@ -99,10 +106,6 @@ deja/
 ```
 
 ## Trajectory Gate
-
-Beyond record/replay, deja can gate an *agent's* behavior, not just a server's contract: freeze
-a recorded MCP environment, run a changed agent against the exact same world, and fail CI when
-its trajectory of tool calls diverges from what you approved.
 
 ```bash
 cd ts
@@ -121,7 +124,7 @@ npx deja gate golden.jsonl -- node your-agent.js
 `DEJA_MCP_URL` pointing at it, captures everything the agent actually did, and exits `0` (pass),
 `1` (behavior diverged), `2` (usage error), or `3` (harness failure — timeout, crash, no
 capture). See [`ts/examples/gate-dogfood`](ts/examples/gate-dogfood) for a minimal working
-example — deja's own CI gates it on every PR.
+example — this repo's own CI gates it on every PR.
 
 Or from a test suite:
 
@@ -136,12 +139,45 @@ test(
 );
 ```
 
-See [`ts/`](ts/) for the full set of comparison modes (`strict`/`unordered`/`subset`/`superset`/
-`policy`) and `--update` semantics.
+The Java side runs the identical CLI:
+
+```bash
+cd java
+./gradlew :cli:installDist
+
+java/cli/build/install/cli/bin/cli trajectory golden.jsonl actual.jsonl --mode strict
+java/cli/build/install/cli/bin/cli gate golden.jsonl -- node your-agent.js
+```
+
+That's not a parallel reimplementation on faith: the Java CLI has been run directly against
+TypeScript's own `ts/examples/gate-dogfood` fixture and produces an identical pass, and both
+languages' JSON output is checked tree-identical (byte-identical for the `exact` vector) against
+the same 10 conformance vectors in [`conformance/trajectory/`](conformance/trajectory/).
+
+Or from a JUnit 5 test suite:
+
+```java
+@Cassette(
+        value = "src/test/resources/fixtures/refund-flow.jsonl",
+        gate = true)
+class RefundFlowGateTest {
+
+    @Test
+    void filesATicketForARefund(McpSession session) {
+        McpSyncClient client = session.connect(); // the real MCP Java SDK client, unmodified
+        runMyAgent(client, "customer wants a refund");
+        // afterEach compares the captured trajectory against the golden and fails the test
+        // if it diverges -- no separate assertion needed.
+    }
+}
+```
+
+See [`ts/`](ts/) and [`java/`](java/) for the full set of comparison modes
+(`strict`/`unordered`/`subset`/`superset`/`policy`) and `--update` semantics.
 
 ## Quick start: TypeScript
 
-The record/replay mechanism Trajectory Gate is built on also works standalone:
+Trajectory Gate is built on plain MCP record/replay, which also works standalone:
 
 ```bash
 cd ts
@@ -201,8 +237,9 @@ class YourServerTest {
 }
 ```
 
-See [`java/`](java/) for the module breakdown. Trajectory Gate (`deja trajectory`/`deja gate`) is
-TypeScript-only for now; Java parity is planned but not yet implemented.
+See [`java/`](java/) for the module breakdown, and the [Trajectory Gate](#trajectory-gate)
+section above for `@Cassette(gate = true)` and the Java `trajectory`/`gate` CLI. Plain
+`record`/`replay`/`verify`/`diff`/`redact` CLI commands remain TS-only.
 
 ## The cassette format
 
@@ -225,6 +262,8 @@ The matching tier ladder's actual claim, replaying semantically-equivalent-but-d
 without introducing dangerous false matches, is backed by a generated (not hand-padded) corpus:
 realistic base interactions across six tool families, run through role-aware transforms that only
 fire where a suitable argument exists, each producing an explicit ground-truth label and rationale.
+Trajectory Gate's own pass/fail calls are only as trustworthy as this replay layer, which is why
+this number is the one to check before trusting a gate result.
 
 ```
 Replay Benchmark v1
@@ -251,6 +290,13 @@ numeric drift, and opaque identifiers like UUIDs/emails/hashes that aren't path/
 in [`ts/benchmarks/RESULTS.md`](ts/benchmarks/RESULTS.md). The corpus generator, every transform,
 and the rationale behind each category is in [`ts/benchmarks/corpus.mjs`](ts/benchmarks/corpus.mjs);
 regenerate with `npm run benchmark` from `ts/`.
+
+Trajectory Gate itself carries its own conformance bar: all 10 comparison vectors in
+[`conformance/trajectory/`](conformance/trajectory/) — exact match, tolerated drift, drifted,
+reordered, duplicate calls, unordered ambiguity, subset, superset, replay-frontier, and
+threshold-boundary cases — produce tree-identical JSON reports in both TypeScript and Java, `npx
+vitest run` reports 201/201 passing, and `./gradlew build` is clean across all three Java modules
+(`deja-core`, `deja-junit5`, `cli`).
 
 ## License
 
