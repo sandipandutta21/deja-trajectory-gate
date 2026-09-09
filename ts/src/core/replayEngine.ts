@@ -25,6 +25,10 @@ export function pairInteractions(frames: CassetteFrame[]): Interaction[] {
     return pairs;
 }
 
+/** Exported so a captured cassette can be scanned after the fact for replay-miss evidence
+ *  (e.g. trajectory's divergence-frontier detection) without duplicating this literal. */
+export const NO_MATCH_ERROR_MESSAGE = "Deja: No matching recorded request found in cassette";
+
 /**
  * The canned response for a request the cassette has no recorded answer for. This uses
  * -32603 (Internal error) rather than -32601 (Method not found): the *method* the client
@@ -37,7 +41,7 @@ export function buildNoMatchError(id: string | number | undefined): JsonRpcMessa
         id,
         error: {
             code: -32603,
-            message: "Deja: No matching recorded request found in cassette",
+            message: NO_MATCH_ERROR_MESSAGE,
         },
     };
 }

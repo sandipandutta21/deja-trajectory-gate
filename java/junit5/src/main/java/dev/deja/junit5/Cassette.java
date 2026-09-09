@@ -40,4 +40,14 @@ public @interface Cassette {
 
     /** Skips redaction when recording. Has no effect in replay mode. */
     boolean noRedact() default false;
+
+    /**
+     * Trajectory Gate mode: instead of failing only on an unmatched request,
+     * captures every request/response exchanged during each test method and, in {@link
+     * #afterEach}, compares the resulting trajectory against {@link #value()} in {@code
+     * strict} mode -- failing the test with a full human-readable report on any divergence,
+     * not just a replay miss. Requires replay mode (no {@code DEJA_MODE=record}): gate
+     * compares against a golden, it doesn't produce one.
+     */
+    boolean gate() default false;
 }

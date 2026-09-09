@@ -1,0 +1,27 @@
+{
+  "reportVersion": 1,
+  "mode": "strict",
+  "threshold": 0.75,
+  "steps": [
+    {
+      "goldenIndex": 0,
+      "actualIndex": 0,
+      "outcome": "drifted",
+      "method": "tools/call",
+      "toolName": "search",
+      "score": 0.30261069340016705,
+      "tier": "semantic"
+    }
+  ],
+  "summary": {
+    "passed": false,
+    "exact": 0,
+    "tolerated": 0,
+    "drifted": 1,
+    "reordered": 0,
+    "added": 0,
+    "missing": 0,
+    "requiredMissing": 0,
+    "prohibitedPresent": 0
+  }
+}

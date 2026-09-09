@@ -59,12 +59,16 @@ public final class ReplayEngine {
         return pairs;
     }
 
+    /** Exported so a captured cassette can be scanned after the fact for replay-miss evidence
+     *  (Trajectory Gate's divergence-frontier detection) without duplicating this literal. */
+    public static final String NO_MATCH_ERROR_MESSAGE = "Deja: No matching recorded request found in cassette";
+
     /** The canned response for a request the cassette has no recorded answer for. Uses
      *  -32603 (Internal error) rather than a JSON-RPC protocol-level code, since the *server*
      *  is fine -- it's deja's replay data that's incomplete. Returned per request, so one miss
      *  never poisons the rest of the session. */
     public static JsonRpcMessage buildNoMatchError(Object id) {
-        return JsonRpcMessage.error(id, new JsonRpcError(-32603, "Deja: No matching recorded request found in cassette"));
+        return JsonRpcMessage.error(id, new JsonRpcError(-32603, NO_MATCH_ERROR_MESSAGE));
     }
 
     public int recordedInteractionCount() {

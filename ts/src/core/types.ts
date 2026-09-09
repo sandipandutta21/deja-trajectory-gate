@@ -51,6 +51,9 @@ export interface ReplayOptions {
     semantic?: boolean | SemanticConfig;
     port?: number;
     stdio?: boolean;
+    /** When set, every inbound/outbound wire frame is tee'd (redacted, with fresh capture-local
+     *  timestamps) into a cassette at this path. The golden itself is never mutated. */
+    capture?: string;
 }
 
 export interface RecordOptions {

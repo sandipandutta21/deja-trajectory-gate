@@ -3,6 +3,7 @@ import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { CassetteReader } from "../../core/cassette.js";
 import { readRawBody } from "./body.js";
 import { normalizeIncoming, ReplayEngine, resolveBatch } from "../../core/replayEngine.js";
+import { openCapture } from "../../gate/capture.js";
 import { formatSseEvent } from "./sse.js";
 import { ReplayOptions } from "../../core/types.js";
 
@@ -60,6 +61,7 @@ export async function startHttpReplayServer(cassettePath: string, options: Repla
     const { frames } = await new CassetteReader(cassettePath).loadAll();
     const engine = new ReplayEngine({ frames, semantic: options.semantic });
     const sessions = new SessionRegistry();
+    const capture = options.capture ? openCapture(options.capture, "http") : undefined;
 
     async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
         if (req.method === "GET") {
@@ -103,7 +105,10 @@ export async function startHttpReplayServer(cassettePath: string, options: Repla
             }
 
             const incoming = normalizeIncoming(parsed);
+            if (capture) for (const msg of incoming) capture.record("c2s", msg);
+
             const responses = await resolveBatch(engine, incoming);
+            if (capture) for (const msg of responses) capture.record("s2c", msg);
 
             const isInitialize = incoming.some((msg) => msg.method === "initialize");
             const sessionId = isInitialize ? sessions.issue() : (existingSession as string | undefined);
@@ -140,7 +145,10 @@ export async function startHttpReplayServer(cassettePath: string, options: Repla
                     const port = typeof address === "object" && address ? address.port : options.port ?? 0;
                     resolve({
                         port,
-                        close: () => new Promise((r) => server.close(() => r())),
+                        close: async () => {
+                            await new Promise<void>((r) => server.close(() => r()));
+                            await capture?.close();
+                        },
                     });
                 });
             });

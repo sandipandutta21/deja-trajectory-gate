@@ -1,0 +1,136 @@
+package dev.deja.cli.gate;
+
+import dev.deja.cli.http.HttpReplayServer;
+import dev.deja.core.cassette.CassetteContents;
+import dev.deja.core.cassette.CassetteFrame;
+import dev.deja.core.cassette.CassetteHeader;
+import dev.deja.core.cassette.CassetteReader;
+import dev.deja.core.cassette.CassetteWriter;
+import dev.deja.core.cassette.TransportType;
+import dev.deja.core.trajectory.Compare;
+import dev.deja.core.trajectory.CompareOptions;
+import dev.deja.core.trajectory.TrajectoryReport;
+import lombok.Builder;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * {@code deja gate}'s supported v1 lifecycle: load golden, start the HTTP replay
+ * server with a capture tee, spawn the agent with {@code DEJA_MCP_URL}, wait for it to finish
+ * (or time out), always close the listener/flush the capture, then extract+compare the
+ * resulting trajectory. Mirrors the TypeScript implementation's {@code gate/run.ts}.
+ *
+ * <p>Pure-ish: returns a result rather than printing or exiting; the CLI layer owns
+ * presentation and the process exit code. The one side effect this class itself performs is
+ * {@code --update}'s cassette rewrite, gated by safe-update preconditions.
+ */
+public final class RunGate {
+
+    private RunGate() {
+    }
+
+    /** 0 pass, 1 behavior diverged, 2 CLI usage/config error (the CLI layer owns
+     *  this one), 3 harness/runtime failure. */
+    @Builder
+    public record Options(Integer port, CompareOptions compareOptions, Long timeoutMs, boolean update) {
+    }
+
+    /** @param report  absent when a harness failure ({@code reason}) happened before a
+     *                 comparison was possible
+     *  @param reason  set only for harness failures ({@code exitCode == 3}) */
+    public record Result(int exitCode, TrajectoryReport report, String reason, boolean updated) {
+        static Result harnessFailure(String reason) {
+            return new Result(3, null, reason, false);
+        }
+    }
+
+    public static Result run(Path goldenPath, List<String> command, Options options) {
+        CassetteContents golden;
+        try {
+            golden = new CassetteReader(goldenPath).loadAll();
+        } catch (RuntimeException e) {
+            return Result.harnessFailure("Unable to read golden cassette: " + e.getMessage());
+        }
+
+        Path capturePath = Path.of(System.getProperty("java.io.tmpdir"), "deja-gate-" + UUID.randomUUID() + ".jsonl");
+
+        HttpReplayServer server;
+        try {
+            server = HttpReplayServer.start(goldenPath, false, options.port() != null ? options.port() : 0, capturePath);
+        } catch (IOException e) {
+            return Result.harnessFailure("Replay server failed to start: " + e.getMessage());
+        }
+
+        Lifecycle.AgentRunResult agentResult;
+        try {
+            agentResult = Lifecycle.runAgent(command, "http://127.0.0.1:" + server.port(), options.timeoutMs());
+        } catch (IOException e) {
+            deleteQuietly(capturePath);
+            return Result.harnessFailure("Failed to spawn agent command: " + e.getMessage());
+        } finally {
+            // Every exit path from here closes the listener and flushes the capture.
+            server.close();
+        }
+
+        try {
+            if (agentResult.timedOut()) {
+                return Result.harnessFailure("Agent timed out after " + options.timeoutMs() + "ms; capture may be incomplete.");
+            }
+            if (agentResult.exitCode() != 0) {
+                return Result.harnessFailure("Agent exited with code " + agentResult.exitCode() + ".");
+            }
+
+            CassetteContents actual;
+            try {
+                actual = new CassetteReader(capturePath).loadAll();
+            } catch (RuntimeException e) {
+                return Result.harnessFailure("No usable capture: " + e.getMessage());
+            }
+
+            if (actual.frames().isEmpty()) {
+                return Result.harnessFailure("No frames captured -- the agent never connected to DEJA_MCP_URL.");
+            }
+
+            TrajectoryReport report = Compare.compareCassetteFrames(golden.frames(), actual.frames(), options.compareOptions());
+
+            boolean updated = false;
+            if (options.update() && (report.session() == null || report.session().replayMisses() == 0)) {
+                promoteCapture(goldenPath, golden.header(), capturePath);
+                updated = true;
+            }
+
+            return new Result(report.summary().passed() ? 0 : 1, report, null, updated);
+        } finally {
+            deleteQuietly(capturePath);
+        }
+    }
+
+    /** Rewrite that preserves the golden's own provenance fields ({@code serverCommand}/{@code
+     *  target} describe the *original* upstream, still meaningful context even though this
+     *  promoted cassette was captured via replay-and-tee rather than a live recording) while
+     *  stamping a fresh {@code recordedAt}. The capture is already redacted by the capture tee
+     *  itself. */
+    private static void promoteCapture(Path goldenPath, CassetteHeader oldHeader, Path capturePath) {
+        CassetteContents captured = new CassetteReader(capturePath).loadAll();
+        try (CassetteWriter writer = new CassetteWriter(goldenPath)) {
+            writer.write(CassetteHeader.of(Instant.now().toString(), TransportType.HTTP, oldHeader.serverCommand(), oldHeader.target()));
+            for (CassetteFrame frame : captured.frames()) {
+                writer.write(frame);
+            }
+        }
+    }
+
+    private static void deleteQuietly(Path path) {
+        try {
+            Files.deleteIfExists(path);
+        } catch (IOException ignored) {
+            // Best-effort cleanup of a temp file -- not worth failing the gate run over.
+        }
+    }
+}

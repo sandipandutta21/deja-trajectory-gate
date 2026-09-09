@@ -1,0 +1,5 @@
+{"type":"header","version":1,"recorded_at":"2026-09-08T00:00:00.000Z","transport":"http","server_command":["node","your-mcp-server.js"]}
+{"type":"frame","dir":"c2s","t_ms":0,"msg":{"jsonrpc":"2.0","id":1,"method":"tools/list"}}
+{"type":"frame","dir":"s2c","t_ms":4,"msg":{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"lookup_customer","inputSchema":{"required":["customerId"]}}]}}}
+{"type":"frame","dir":"c2s","t_ms":8,"msg":{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"lookup_customer","customerId":"c-42"}}}
+{"type":"frame","dir":"s2c","t_ms":15,"msg":{"jsonrpc":"2.0","id":2,"result":{"name":"Jane Doe","status":"active"}}}

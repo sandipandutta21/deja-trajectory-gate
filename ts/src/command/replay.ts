@@ -2,6 +2,7 @@ import { createInterface } from "node:readline";
 import { CassetteReader } from "../core/cassette.js";
 import { startHttpReplayServer } from "../transport/http/server.js";
 import { ReplayEngine } from "../core/replayEngine.js";
+import { openCapture } from "../gate/capture.js";
 import { JsonRpcMessage, ReplayOptions } from "../core/types.js";
 
 /**
@@ -15,6 +16,7 @@ export async function replayStdio(cassettePath: string, options: ReplayOptions =
     const { frames } = await new CassetteReader(cassettePath).loadAll();
     const engine = new ReplayEngine({ frames, semantic: options.semantic });
     const rl = createInterface({ input: process.stdin });
+    const capture = options.capture ? openCapture(options.capture, "stdio") : undefined;
 
     let queue: Promise<void> = Promise.resolve();
 
@@ -26,8 +28,12 @@ export async function replayStdio(cassettePath: string, options: ReplayOptions =
             return; // not JSON-RPC -- nothing for deja to answer
         }
 
+        capture?.record("c2s", incoming);
         const response = await engine.resolve(incoming);
-        if (response) process.stdout.write(JSON.stringify(response) + "\n");
+        if (response) {
+            capture?.record("s2c", response);
+            process.stdout.write(JSON.stringify(response) + "\n");
+        }
     };
 
     rl.on("line", (line) => {
@@ -37,6 +43,7 @@ export async function replayStdio(cassettePath: string, options: ReplayOptions =
 
     await new Promise<void>((resolve) => rl.on("close", resolve));
     await queue;
+    await capture?.close();
 }
 
 /** Serves a cassette as a spec-compliant MCP Streamable HTTP server until interrupted. */

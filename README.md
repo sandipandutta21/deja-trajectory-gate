@@ -1,12 +1,22 @@
 # deja
 
-**Record/replay for MCP that survives non-deterministic agent clients.**
+**Replay the environment. Gate the agent.**
 
-`deja` is a VCR for the [Model Context Protocol](https://modelcontextprotocol.io): it records a
-real MCP session (stdio or Streamable HTTP) to a plain JSONL cassette, then replays it later
-(offline, deterministic, in CI) even though the client replaying it will never send byte-for-byte
-identical requests twice. That gap is closed by a tiered matcher (exact → structural →
-deterministic semantic similarity) instead of a naive request/response recording.
+deja replays an agent's environment, not the agent: freeze a recorded MCP world, run a changed
+model, prompt, rule, or tool against it, and fail CI when the resulting trajectory of tool calls
+diverges from what you approved.
+
+Under the hood, it's a full [MCP](https://modelcontextprotocol.io) record/replay proxy — the
+cassette is a plain, inspectable JSONL artifact you can also use standalone, independent of
+Trajectory Gate.
+
+```text
+The cassette is open.
+The replay is offline.
+The comparison is deterministic by default.
+No model vendor owns the judge.
+Nobody else combines wire-level environment replay with trajectory gating in one artifact.
+```
 
 One open cassette format, two independent language implementations (TypeScript and Java) that
 read and write byte-compatible files, and native test integrations for both ecosystems.
@@ -18,23 +28,43 @@ read and write byte-compatible files, and native test integrations for both ecos
 
 ## Why
 
-Record/replay testing tools assume a deterministic client: same request in, same request out,
-every time. An LLM-driven agent breaks that assumption: the same *intent* ("read this file")
-can arrive as structurally different JSON-RPC calls between runs. A naive VCR either matches too
-strictly (the recording rots the moment an agent phrases a call slightly differently) or too
-loosely (a fuzzy matcher risks confidently returning the wrong tool's content for a request that
-only looks similar). `deja`'s matching tier ladder, with hard safety gates against exactly that
-failure mode, is the part of this project that isn't "MCP nock."
+Tracing and eval tools can tell you an agent's trajectory changed — but they start from a trace
+someone already produced (OpenTelemetry, Langfuse, LangSmith, an SDK export) and can't
+reconstruct the environment a *different* agent needs to make real decisions against. MCP-level
+record/replay tools solve the opposite half: they can replay an identical client, but stop there
+— no trajectory comparison, no CI gate.
+
+deja does both, from one artifact: capture the MCP wire once, replay that frozen world for a
+changed agent, then align and gate the trajectory it actually produced. Comparison is
+deterministic by default — no LLM judge required, no vendor owns what "equivalent" means — with
+an optional judge only as a tiebreaker inside a narrow uncertainty band.
+
+That replay still has to survive a non-deterministic client: the same *intent* ("read this
+file") can arrive as structurally different JSON-RPC calls between runs. A naive VCR either
+matches too strictly (the recording rots the moment an agent phrases a call slightly
+differently) or too loosely (a fuzzy matcher risks confidently returning the wrong tool's
+content for a request that only looks similar). deja's matching tier ladder — exact → structural
+→ deterministic semantic similarity — with hard safety gates against exactly that failure mode,
+is what makes the replay trustworthy enough to gate on.
 
 ## Highlights
 
+- **Trajectory Gate**: freeze a recorded MCP environment, run a changed agent against it, and
+  fail CI when its tool-call trajectory diverges. `deja trajectory` compares two already-captured
+  sessions directly; `deja gate` owns the whole run (start replay, spawn the agent with
+  `DEJA_MCP_URL`, capture, compare) in one command. Comparison modes: `strict`, `unordered`,
+  `subset`, `superset`, and `policy` (explicit required/prohibited/optional steps). A replay miss
+  establishes a divergence frontier — downstream observations are reported as consequences of it,
+  not independent regressions. Safe `--update` promotes a captured session to a new golden only
+  when there were zero replay misses.
 - **Recording**: transparent stdio proxy or Streamable HTTP proxy (SSE and pre-2025 batch
   arrays included); captures the full wire, including server-initiated traffic (notifications,
   sampling, elicitation); secret redaction on by default (GitHub/`sk-`/Slack/AWS/JWT/Bearer/
   URL-embedded credentials → deterministic, hashed placeholders).
 - **Replay**: the cassette *is* the server, over stdio or HTTP; cross-transport (record over
-  HTTP, replay over stdio, or vice versa); a matcher failure answers a clean JSON-RPC error for
-  that one request instead of poisoning the whole session.
+  HTTP, replay over stdio, or vice versa); `--capture` tees the live session to a separate
+  cassette (redacted, fresh timestamps) without ever mutating the golden; a matcher failure
+  answers a clean JSON-RPC error for that one request instead of poisoning the whole session.
 - **Matching, the differentiator**: exact → structural (key-order independent) → deterministic
   semantic (token Jaccard + trigram Dice + numeric closeness + recursive structural weighting) →
   optional bring-your-own LLM judge for the uncertain band only. Hard gates: `tools/call` never
@@ -44,10 +74,10 @@ failure mode, is the part of this project that isn't "MCP nock."
   responses field-by-field to catch drift; `deja diff` classifies breaking vs. minor changes
   between two cassettes (removed tools, newly-required params, result↔error flips, removed
   fields); `deja redact --scan` is a CI tripwire against committing an unredacted fixture.
-- **Native test integrations**: a zero-config `useCassette()` Vitest fixture on the TS side; a
-  JUnit 5 `@Cassette` extension on the Java side that lets the official MCP Java SDK's
-  `McpClient` run **unmodified** against a cassette, with `DEJA_MODE=record` re-recording the
-  identical test code against a real server.
+- **Native test integrations**: `withGate()` and a zero-config `useCassette()` Vitest fixture on
+  the TS side; a JUnit 5 `@Cassette` extension on the Java side that lets the official MCP Java
+  SDK's `McpClient` run **unmodified** against a cassette, with `DEJA_MODE=record` re-recording
+  the identical test code against a real server.
 - **Validated against real servers**, not just fixtures: both implementations are tested
   directly against the official MCP reference servers (`server-everything`,
   `server-filesystem`), which is how several of the correctness fixes in this codebase were
@@ -57,17 +87,61 @@ failure mode, is the part of this project that isn't "MCP nock."
 
 ```
 deja/
-├── ts/            TypeScript implementation: CLI (deja record/replay/verify/diff/redact)
-│                  + library + Vitest integration
+├── ts/            TypeScript implementation: CLI (deja record/replay/verify/diff/redact/
+│                  trajectory/gate) + library + Vitest integration
 ├── java/          Java implementation: deja-core (native engine) + deja-junit5
 │                  (JUnit 5 @Cassette extension), a Gradle multi-module build
 ├── conformance/   Cassette fixtures shared by both test suites, proving the two
-│                  implementations read and write byte-compatible files
+│                  implementations read and write byte-compatible files, plus the
+│                  Trajectory Gate comparison vectors (conformance/trajectory/)
 ├── LICENSE
 └── README.md      you are here
 ```
 
+## Trajectory Gate
+
+Beyond record/replay, deja can gate an *agent's* behavior, not just a server's contract: freeze
+a recorded MCP environment, run a changed agent against the exact same world, and fail CI when
+its trajectory of tool calls diverges from what you approved.
+
+```bash
+cd ts
+npm install
+npm run build
+
+# Compare two already-captured trajectories directly
+npx deja trajectory golden.jsonl actual.jsonl --mode strict
+
+# Or let deja own the whole run: start replay, spawn your agent with DEJA_MCP_URL set,
+# capture its actual session, then compare -- one command
+npx deja gate golden.jsonl -- node your-agent.js
+```
+
+`deja gate` starts an HTTP replay server over `golden.jsonl`, spawns `your-agent.js` with
+`DEJA_MCP_URL` pointing at it, captures everything the agent actually did, and exits `0` (pass),
+`1` (behavior diverged), `2` (usage error), or `3` (harness failure — timeout, crash, no
+capture). See [`ts/examples/gate-dogfood`](ts/examples/gate-dogfood) for a minimal working
+example — deja's own CI gates it on every PR.
+
+Or from a test suite:
+
+```ts
+import { withGate } from "deja-mcp/vitest";
+
+test(
+  "files a ticket for a refund request",
+  withGate("golden/refund-flow.jsonl", async ({ url }) => {
+    await runMyAgent({ mcpUrl: url, prompt: "customer wants a refund" });
+  })
+);
+```
+
+See [`ts/`](ts/) for the full set of comparison modes (`strict`/`unordered`/`subset`/`superset`/
+`policy`) and `--update` semantics.
+
 ## Quick start: TypeScript
+
+The record/replay mechanism Trajectory Gate is built on also works standalone:
 
 ```bash
 cd ts
@@ -127,7 +201,8 @@ class YourServerTest {
 }
 ```
 
-See [`java/`](java/) for the module breakdown.
+See [`java/`](java/) for the module breakdown. Trajectory Gate (`deja trajectory`/`deja gate`) is
+TypeScript-only for now; Java parity is planned but not yet implemented.
 
 ## The cassette format
 
@@ -141,7 +216,8 @@ A cassette is a JSONL file: one header line, then one line per captured frame.
 
 It's a plain, versioned, language-agnostic format on purpose: [`conformance/`](conformance/)
 holds fixtures written by one implementation and read by the other, including a proof that both
-languages compute the *identical* redaction hash for the same secret.
+languages compute the *identical* redaction hash for the same secret. Trajectory Gate is a
+derived view over this same format — no second recording format, no cassette schema changes.
 
 ## Benchmark
 

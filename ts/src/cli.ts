@@ -1,17 +1,23 @@
 #!/usr/bin/env node
 import { parseArgs } from "node:util";
 import { diffCassettes } from "./command/diff.js";
+import { parseDurationMs, runGate } from "./command/gate.js";
 import { recordHttp, recordStdio } from "./command/record.js";
 import { runClean, runScan } from "./command/redact.js";
 import { replayHttp, replayStdio } from "./command/replay.js";
+import { compareTrajectoryCassettes, deriveTrajectoryPolicy, readTrajectoryPolicy } from "./command/trajectory.js";
 import { DiffReport, VerifyReport } from "./core/types.js";
 import { verifyCassette } from "./command/verify.js";
+import { renderHumanReport, toCanonicalJson } from "./trajectory/report.js";
+import { TrajectoryMode } from "./trajectory/types.js";
 
 const args = process.argv.slice(2);
 
+const TRAJECTORY_MODES: TrajectoryMode[] = ["strict", "unordered", "subset", "superset", "policy"];
+
 function printUsage(): void {
     console.error("Usage: deja <command> [options]");
-    console.error("Commands: record, replay, verify, diff, redact");
+    console.error("Commands: record, replay, verify, diff, redact, trajectory, gate");
 }
 
 if (args.length === 0) {
@@ -93,6 +99,7 @@ async function main(): Promise<void> {
                 options: {
                     semantic: { type: "boolean" },
                     port: { type: "string" },
+                    capture: { type: "string" },
                 },
                 allowPositionals: true,
             });
@@ -104,13 +111,14 @@ async function main(): Promise<void> {
             }
 
             const semantic = !!values.semantic;
+            const capture = values.capture;
 
             // Presence of --port picks the HTTP replay server; its absence means stdio --
             // independent of how the cassette was originally recorded (cross-transport replay).
             if (values.port !== undefined) {
-                await replayHttp(cassettePath, { semantic, port: Number(values.port) });
+                await replayHttp(cassettePath, { semantic, port: Number(values.port), capture });
             } else {
-                await replayStdio(cassettePath, { semantic });
+                await replayStdio(cassettePath, { semantic, capture });
             }
             break;
         }
@@ -161,6 +169,126 @@ async function main(): Promise<void> {
             const report = await diffCassettes(positionals[0], positionals[1]);
             printDiffReport(report);
             if (values["fail-on-breaking"] && report.breakingCount > 0) process.exit(1);
+            break;
+        }
+        case "trajectory": {
+            const { values, positionals } = parseArgs({
+                args: commandArgs,
+                options: {
+                    mode: { type: "string" },
+                    policy: { type: "string" },
+                    "derive-policy": { type: "string" },
+                    threshold: { type: "string" },
+                    include: { type: "string", multiple: true },
+                    json: { type: "boolean" },
+                },
+                allowPositionals: true,
+            });
+
+            const goldenPath = positionals[0];
+            if (!goldenPath) {
+                console.error("Error: Provide a golden cassette path " +
+                    "(e.g., deja trajectory golden.jsonl actual.jsonl)");
+                process.exit(1);
+            }
+
+            if (values["derive-policy"]) {
+                const outputPath = values["derive-policy"];
+                await deriveTrajectoryPolicy(goldenPath, outputPath);
+                console.log(`Deja: wrote a starting policy to ${outputPath}.`);
+                break;
+            }
+
+            const actualPath = positionals[1];
+            if (!actualPath) {
+                console.error("Error: Provide an actual cassette path " +
+                    "(e.g., deja trajectory golden.jsonl actual.jsonl)");
+                process.exit(1);
+            }
+
+            const mode = (values.mode as TrajectoryMode | undefined) ?? "strict";
+            if (!TRAJECTORY_MODES.includes(mode)) {
+                console.error(`Error: --mode must be one of ${TRAJECTORY_MODES.join(", ")}`);
+                process.exit(1);
+            }
+
+            if (mode === "policy" && !values.policy) {
+                console.error("Error: --mode policy requires --policy <policy.json>");
+                process.exit(1);
+            }
+
+            const report = await compareTrajectoryCassettes(goldenPath, actualPath, {
+                mode,
+                threshold: values.threshold ? Number(values.threshold) : undefined,
+                include: values.include ?? [],
+                policy: values.policy ? await readTrajectoryPolicy(values.policy) : undefined,
+            });
+
+            console.log(values.json ? toCanonicalJson(report) : renderHumanReport(report, goldenPath));
+            if (!report.summary.passed) process.exit(1);
+            break;
+        }
+        case "gate": {
+            const { before, after } = splitOnDashDash(commandArgs);
+            const { values, positionals } = parseArgs({
+                args: before,
+                options: {
+                    port: { type: "string" },
+                    mode: { type: "string" },
+                    policy: { type: "string" },
+                    threshold: { type: "string" },
+                    timeout: { type: "string" },
+                    json: { type: "boolean" },
+                    update: { type: "boolean" },
+                },
+                allowPositionals: true,
+            });
+
+            const goldenPath = positionals[0];
+            if (!goldenPath) {
+                console.error("Error: Provide a golden cassette path (e.g., deja gate golden.jsonl -- node agent.js)");
+                process.exit(2);
+            }
+            if (after.length === 0) {
+                console.error("Error: Provide an agent command after '--' (e.g., deja gate golden.jsonl -- node agent.js)");
+                process.exit(2);
+            }
+
+            const mode = (values.mode as TrajectoryMode | undefined) ?? "strict";
+            if (!TRAJECTORY_MODES.includes(mode)) {
+                console.error(`Error: --mode must be one of ${TRAJECTORY_MODES.join(", ")}`);
+                process.exit(2);
+            }
+            if (mode === "policy" && !values.policy) {
+                console.error("Error: --mode policy requires --policy <policy.json>");
+                process.exit(2);
+            }
+
+            let timeoutMs: number | undefined;
+            try {
+                timeoutMs = values.timeout ? parseDurationMs(values.timeout) : undefined;
+            } catch (err) {
+                console.error(`Error: ${(err as Error).message}`);
+                process.exit(2);
+            }
+
+            const result = await runGate(goldenPath, after, {
+                port: values.port ? Number(values.port) : undefined,
+                mode,
+                threshold: values.threshold ? Number(values.threshold) : undefined,
+                policy: values.policy ? await readTrajectoryPolicy(values.policy) : undefined,
+                timeoutMs,
+                update: !!values.update,
+            });
+
+            if (result.report) {
+                console.log(values.json ? toCanonicalJson(result.report) : renderHumanReport(result.report, goldenPath));
+                if (result.updated) console.log("Deja: golden cassette updated with the captured session.");
+            } else {
+                console.error(`Deja gate: harness failure -- ${result.reason}`);
+            }
+
+            process.exit(result.exitCode);
             break;
         }
         case "redact": {

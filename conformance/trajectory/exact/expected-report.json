@@ -1,0 +1,27 @@
+{
+  "reportVersion": 1,
+  "mode": "strict",
+  "threshold": 0.75,
+  "steps": [
+    {
+      "goldenIndex": 0,
+      "actualIndex": 0,
+      "outcome": "exact",
+      "method": "tools/call",
+      "toolName": "lookup_customer",
+      "score": 1,
+      "tier": "exact"
+    }
+  ],
+  "summary": {
+    "passed": true,
+    "exact": 1,
+    "tolerated": 0,
+    "drifted": 0,
+    "reordered": 0,
+    "added": 0,
+    "missing": 0,
+    "requiredMissing": 0,
+    "prohibitedPresent": 0
+  }
+}

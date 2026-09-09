@@ -1,0 +1,39 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ts
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      # Trajectory Gate dogfood (LLD v0.2 §20): gates a deterministic example agent against a
+      # committed golden on every PR, exercising the exact `deja gate` workflow the README
+      # documents -- not a mocked stand-in for it.
+      - name: Dogfood deja gate
+        run: node dist/cli.js gate examples/gate-dogfood/golden.jsonl -- node examples/gate-dogfood/agent.cjs

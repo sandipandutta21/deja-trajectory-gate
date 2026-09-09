@@ -1,7 +1,7 @@
 {
   "name": "deja-mcp",
   "version": "0.1.0",
-  "description": "Record and replay for the Model Context Protocol (MCP)",
+  "description": "Trajectory Gate for MCP agents: record/replay an environment, gate CI on agent behavior regressions",
   "type": "module",
   "bin": {
     "deja": "./dist/cli.js"

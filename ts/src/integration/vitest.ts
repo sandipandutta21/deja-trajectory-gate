@@ -1,9 +1,18 @@
 import {ChildProcessByStdio, ChildProcessWithoutNullStreams, spawn} from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { unlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { afterAll, afterEach } from "vitest";
 import { CassetteReader, CassetteWriter } from "../core/cassette.js";
 import { redactObject } from "../core/redact.js";
+import { promoteCapture } from "../gate/run.js";
 import { ReplayEngine } from "../core/replayEngine.js";
+import { startHttpReplayServer } from "../transport/http/server.js";
+import { compareCassetteFrames } from "../trajectory/compare.js";
+import { renderHumanReport } from "../trajectory/report.js";
+import { TrajectoryCompareOptions } from "../trajectory/types.js";
 import { JsonRpcMessage, ReplayOptions } from "../core/types.js";
 import {Readable, Writable} from "node:stream";
 
@@ -187,5 +196,67 @@ export function useCassette(cassettePath: string, options: UseCassetteOptions) {
             await client.connect(transport);
             return client;
         },
+    };
+}
+
+export interface GateContext {
+    /** The replay server's URL -- point the agent under test's own MCP client at this. */
+    url: string;
+}
+
+export interface WithGateOptions extends TrajectoryCompareOptions {
+    /** Promote the captured session to become the new golden (safe-update preconditions still
+     *  apply -- refused, and the test still fails, if there was any replay miss). */
+    update?: boolean;
+}
+
+/**
+ * A vitest fixture for Trajectory Gate assertions: starts an HTTP replay server
+ * over `goldenPath` with a capture tee, hands the test callback the replay URL to point its own
+ * agent/MCP client at, then -- once the callback returns -- extracts and compares the captured
+ * trajectory against the golden, failing the test on divergence. The fixture owns the whole
+ * replay lifecycle, capture, and assertion; the test body only drives the agent under test:
+ *
+ * ```ts
+ * test("files a ticket for a refund request", withGate("golden/refund-flow.jsonl", async ({ url }) => {
+ *   await runMyAgent({ mcpUrl: url, prompt: "customer wants a refund" });
+ * }));
+ * ```
+ */
+export function withGate(
+    goldenPath: string,
+    testFn: (ctx: GateContext) => Promise<void>,
+    options: WithGateOptions = {}
+): () => Promise<void> {
+    return async () => {
+        const capturePath = resolve(tmpdir(), `deja-gate-${randomUUID()}.jsonl`);
+        const { header, frames: goldenFrames } = await new CassetteReader(goldenPath).loadAll();
+        const handle = await startHttpReplayServer(goldenPath, { capture: capturePath });
+
+        try {
+            await testFn({ url: `http://127.0.0.1:${handle.port}` });
+        } finally {
+            await handle.close();
+        }
+
+        try {
+            const { frames: actualFrames } = await new CassetteReader(capturePath).loadAll();
+            const report = compareCassetteFrames(goldenFrames, actualFrames, options);
+
+            // A recording/update mode must never silently promote an incomplete capture:
+            // promotion requires zero replay misses, same precondition `deja gate --update`
+            // enforces. Refused, the test still fails on the report below rather than passing
+            // silently.
+            if (options.update && (report.session?.replayMisses ?? 0) === 0) {
+                await promoteCapture(goldenPath, header, capturePath);
+                return;
+            }
+
+            if (!report.summary.passed) {
+                throw new Error(renderHumanReport(report, goldenPath));
+            }
+        } finally {
+            await unlink(capturePath).catch(() => {});
+        }
     };
 }

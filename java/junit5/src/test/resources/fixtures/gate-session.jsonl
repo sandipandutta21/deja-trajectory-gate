@@ -1,0 +1,3 @@
+{"type":"header","version":1,"recorded_at":"2026-09-08T00:00:00.000Z","transport":"stdio"}
+{"type":"frame","dir":"c2s","t_ms":0,"msg":{"jsonrpc":"2.0","id":1,"method":"tools/list"}}
+{"type":"frame","dir":"s2c","t_ms":1,"msg":{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"test-tool"}]}}}

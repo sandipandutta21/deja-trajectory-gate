@@ -1,0 +1,6 @@
+{"type":"header","version":1,"recorded_at":"now","transport":"stdio"}
+{"type":"frame","dir":"c2s","t_ms":0,"msg":{"jsonrpc":"2.0","id":1,"method":"tools/list"}}
+{"type":"frame","dir":"s2c","t_ms":1,"msg":{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}}
+{"type":"frame","dir":"c2s","t_ms":2,"msg":{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"send_email"}}}
+{"type":"frame","dir":"s2c","t_ms":3,"msg":{"jsonrpc":"2.0","id":2,"error":{"code":-32603,"message":"Deja: No matching recorded request found in cassette"}}}
+{"type":"frame","dir":"c2s","t_ms":4,"msg":{"jsonrpc":"2.0","id":3,"method":"tools/list"}}

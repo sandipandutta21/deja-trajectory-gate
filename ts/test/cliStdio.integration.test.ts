@@ -108,6 +108,46 @@ describe("deja replay (stdio, built CLI)", () => {
     replay.kill();
   });
 
+  it("--capture tees the session (redacted) to a separate cassette", async () => {
+    const cassettePath = resolve(testDir, "for-capture.jsonl");
+    const writer = new CassetteWriter(cassettePath);
+    writer.write(header);
+    writer.write({ type: "frame", dir: "c2s", t_ms: 0, msg: { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} } });
+    writer.write({ type: "frame", dir: "s2c", t_ms: 1, msg: { jsonrpc: "2.0", id: 1, result: { tools: [] } } });
+    await writer.close();
+
+    const capturePath = resolve(testDir, "captured.jsonl");
+    const replay = spawn(process.execPath, [cliPath, "replay", cassettePath, "--capture", capturePath]);
+    const exitPromise = waitForExit(replay);
+
+    // A matched request.
+    replay.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }) + "\n");
+    await readOneLine(replay.stdout);
+
+    // An unrecorded request, carrying a secret -- the capture must redact it even though
+    // the request itself is a miss.
+    const secret = "sk-abc123def456ghi789jkl012mno345pqr678stu901";
+    replay.stdin.write(
+      JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "unrecorded", note: secret } }) + "\n"
+    );
+    await readOneLine(replay.stdout);
+
+    replay.stdin.end();
+    await exitPromise;
+
+    const { header: capturedHeader, frames } = await new CassetteReader(capturePath).loadAll();
+    expect(capturedHeader.transport).toBe("stdio");
+
+    const matched = frames.find((f) => f.dir === "s2c" && f.msg.id === 1);
+    expect(matched?.msg.result).toEqual({ tools: [] });
+
+    const missRequest = frames.find((f) => f.dir === "c2s" && f.msg.id === 2);
+    expect((missRequest?.msg.params as any).note).toMatch(/\[REDACTED:sk:[a-f0-9]{8}\]/);
+
+    const missResponse = frames.find((f) => f.dir === "s2c" && f.msg.id === 2);
+    expect(missResponse?.msg.error?.code).toBe(-32603);
+  });
+
   it("returns a -32603 error for an unmatched request", async () => {
     const cassettePath = resolve(testDir, "for-replay-miss.jsonl");
     const writer = new CassetteWriter(cassettePath);

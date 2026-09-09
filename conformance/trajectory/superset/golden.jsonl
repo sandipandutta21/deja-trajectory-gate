@@ -1,0 +1,2 @@
+{"type":"header","version":1,"recorded_at":"now","transport":"stdio"}
+{"type":"frame","dir":"c2s","t_ms":0,"msg":{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"lookup_customer"}}}

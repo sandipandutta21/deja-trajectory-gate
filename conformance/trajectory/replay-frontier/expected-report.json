@@ -1,0 +1,49 @@
+{
+  "reportVersion": 1,
+  "mode": "strict",
+  "threshold": 0.75,
+  "steps": [
+    {
+      "goldenIndex": 0,
+      "actualIndex": 0,
+      "outcome": "exact",
+      "method": "tools/list",
+      "score": 1,
+      "tier": "exact"
+    },
+    {
+      "actualIndex": 1,
+      "outcome": "added",
+      "method": "tools/call",
+      "toolName": "send_email",
+      "phase": "post-divergence"
+    },
+    {
+      "actualIndex": 2,
+      "outcome": "added",
+      "method": "tools/list",
+      "phase": "post-divergence"
+    },
+    {
+      "goldenIndex": 1,
+      "outcome": "missing",
+      "method": "tools/call",
+      "toolName": "search_orders"
+    }
+  ],
+  "session": {
+    "replayMisses": 1,
+    "firstMissFrameIndex": 2
+  },
+  "summary": {
+    "passed": false,
+    "exact": 1,
+    "tolerated": 0,
+    "drifted": 0,
+    "reordered": 0,
+    "added": 2,
+    "missing": 1,
+    "requiredMissing": 0,
+    "prohibitedPresent": 0
+  }
+}
