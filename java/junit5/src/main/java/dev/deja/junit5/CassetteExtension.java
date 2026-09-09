@@ -72,7 +72,7 @@ public final class CassetteExtension implements
             store.put(RECORDER_KEY, new ProcessRecorder(command, Path.of(annotation.value()), !annotation.noRedact()));
         } else {
             var contents = new CassetteReader(Path.of(annotation.value())).loadAll();
-            store.put(ENGINE_KEY, new ReplayEngine(contents.frames(), annotation.semantic(), null));
+            store.put(ENGINE_KEY, new ReplayEngine(contents.frames(), annotation.semantic(), null, annotation.consumeOnce()));
             store.put(GOLDEN_FRAMES_KEY, contents.frames());
         }
     }

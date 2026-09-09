@@ -34,7 +34,7 @@ public class Frontier {
             if (frame.dir() != Direction.S2C) {
                 continue;
             }
-            if (frame.msg().error() == null || !ReplayEngine.NO_MATCH_ERROR_MESSAGE.equals(frame.msg().error().message())) {
+            if (frame.msg().error() == null || frame.msg().error().code() != ReplayEngine.NO_MATCH_ERROR_CODE) {
                 continue;
             }
 

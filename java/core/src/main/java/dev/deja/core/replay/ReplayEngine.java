@@ -14,7 +14,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 /**
  * Resolves incoming JSON-RPC messages against a cassette: structural match first, semantic
@@ -27,15 +30,34 @@ public final class ReplayEngine {
     private final List<Interaction> interactions;
     private final boolean semanticEnabled;
     private final SemanticConfig semanticConfig;
+    private final boolean consumeOnce;
+    private final Set<Interaction> consumed = ConcurrentHashMap.newKeySet();
 
     public ReplayEngine(List<CassetteFrame> frames) {
         this(frames, false, null);
     }
 
     public ReplayEngine(List<CassetteFrame> frames, boolean semanticEnabled, SemanticConfig semanticConfig) {
+        this(frames, semanticEnabled, semanticConfig, false);
+    }
+
+    /**
+     * @param consumeOnce Default {@code false} (matching is stateless: a recorded interaction
+     *                     can satisfy any number of matching requests, which is what lets
+     *                     Trajectory Gate's own trajectory comparison be the thing that catches
+     *                     an unexpected duplicate call). Set {@code true} for VCR-style one-shot
+     *                     semantics instead: each recorded interaction is consumed by the first
+     *                     request that matches it and is never offered to a later request.
+     *                     Single-consumer semantics -- if multiple concurrent clients replay
+     *                     against one engine instance with this on, they race for the same
+     *                     interactions; every current call site constructs one engine per
+     *                     session, so this isn't a supported multi-client scenario either way.
+     */
+    public ReplayEngine(List<CassetteFrame> frames, boolean semanticEnabled, SemanticConfig semanticConfig, boolean consumeOnce) {
         this.interactions = pairInteractions(frames);
         this.semanticEnabled = semanticEnabled;
         this.semanticConfig = semanticConfig != null ? semanticConfig : SemanticConfig.builder().build();
+        this.consumeOnce = consumeOnce;
     }
 
     /** Pairs recorded client requests with their recorded responses by JSON-RPC id. A request
@@ -60,15 +82,21 @@ public final class ReplayEngine {
     }
 
     /** Exported so a captured cassette can be scanned after the fact for replay-miss evidence
-     *  (Trajectory Gate's divergence-frontier detection) without duplicating this literal. */
+     *  (Trajectory Gate's divergence-frontier detection) without duplicating this literal. Kept
+     *  for human-readable reports; detection itself keys off {@code NO_MATCH_ERROR_CODE}, not
+     *  this string -- a message is not a stable internal API contract. */
     public static final String NO_MATCH_ERROR_MESSAGE = "Deja: No matching recorded request found in cassette";
+
+    /** The JSON-RPC error code {@code buildNoMatchError} always uses -- exported so frontier
+     *  detection can key off a stable numeric field instead of matching the message text. */
+    public static final int NO_MATCH_ERROR_CODE = -32603;
 
     /** The canned response for a request the cassette has no recorded answer for. Uses
      *  -32603 (Internal error) rather than a JSON-RPC protocol-level code, since the *server*
      *  is fine -- it's deja's replay data that's incomplete. Returned per request, so one miss
      *  never poisons the rest of the session. */
     public static JsonRpcMessage buildNoMatchError(Object id) {
-        return JsonRpcMessage.error(id, new JsonRpcError(-32603, NO_MATCH_ERROR_MESSAGE));
+        return JsonRpcMessage.error(id, new JsonRpcError(NO_MATCH_ERROR_CODE, NO_MATCH_ERROR_MESSAGE));
     }
 
     public int recordedInteractionCount() {
@@ -83,11 +111,18 @@ public final class ReplayEngine {
             return CompletableFuture.completedFuture(Optional.empty());
         }
 
-        Optional<Interaction> structuralMatch = interactions.stream()
+        List<Interaction> available = consumeOnce
+                ? interactions.stream().filter(interaction -> !consumed.contains(interaction)).collect(Collectors.toList())
+                : interactions;
+
+        Optional<Interaction> structuralMatch = available.stream()
                 .filter(interaction -> Match.matchStructural(incoming, interaction.request().msg()))
                 .findFirst();
 
         if (structuralMatch.isPresent()) {
+            if (consumeOnce) {
+                consumed.add(structuralMatch.get());
+            }
             return CompletableFuture.completedFuture(Optional.of(resolveResponse(structuralMatch.get(), incoming)));
         }
 
@@ -96,7 +131,7 @@ public final class ReplayEngine {
         }
 
         SemanticMatchOptions<Interaction> options = SemanticMatchOptions.<Interaction>builder()
-                .candidates(interactions)
+                .candidates(available)
                 .messageExtractor(interaction -> interaction.request().msg())
                 .threshold(semanticConfig.threshold())
                 .judge(semanticConfig.judge())
@@ -104,8 +139,12 @@ public final class ReplayEngine {
 
         return Match.findSemanticMatch(incoming, options)
                 .thenApply(maybeMatch -> Optional.of(
-                        maybeMatch.map(match -> resolveResponse(match, incoming))
-                                .orElseGet(() -> buildNoMatchError(incoming.id()))));
+                        maybeMatch.map(match -> {
+                            if (consumeOnce) {
+                                consumed.add(match);
+                            }
+                            return resolveResponse(match, incoming);
+                        }).orElseGet(() -> buildNoMatchError(incoming.id()))));
     }
 
     private JsonRpcMessage resolveResponse(Interaction interaction, JsonRpcMessage incoming) {

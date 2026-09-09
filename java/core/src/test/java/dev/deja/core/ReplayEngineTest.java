@@ -117,4 +117,38 @@ class ReplayEngineTest {
     void recordedInteractionCountReflectsTheNumberOfPairedInteractions() {
         assertThat(new ReplayEngine(fetchFixture()).recordedInteractionCount()).isEqualTo(1);
     }
+
+    @Test
+    void byDefaultResolvesAnIdenticalRequestEveryTimeStateless() {
+        ReplayEngine engine = new ReplayEngine(fetchFixture());
+        JsonRpcMessage request = JsonRpcMessage.request(1, "tools/call", Map.of("name", "fetch", "query", "best pizza near me"));
+
+        assertThat(await(engine.resolve(request)).get().result()).isEqualTo(Map.of("ok", true));
+        assertThat(await(engine.resolve(request)).get().result()).isEqualTo(Map.of("ok", true));
+    }
+
+    @Test
+    void withConsumeOnceASecondIdenticalRequestMissesOnceTheOneRecordedInteractionIsUsed() {
+        ReplayEngine engine = new ReplayEngine(fetchFixture(), false, null, true);
+        JsonRpcMessage request = JsonRpcMessage.request(1, "tools/call", Map.of("name", "fetch", "query", "best pizza near me"));
+
+        assertThat(await(engine.resolve(request)).get().result()).isEqualTo(Map.of("ok", true));
+        Optional<JsonRpcMessage> second = await(engine.resolve(request));
+        assertThat(second.get().error().code()).isEqualTo(-32603);
+    }
+
+    @Test
+    void withConsumeOnceAndTwoRecordedIdenticalInteractionsResolvesInRecordedOrderThenMisses() {
+        List<CassetteFrame> twoInteractionFrames = List.of(
+                frame(Direction.C2S, JsonRpcMessage.request(1, "tools/call", Map.of("name", "fetch", "query", "best pizza near me"))),
+                frame(Direction.S2C, JsonRpcMessage.result(1, Map.of("page", "first"))),
+                frame(Direction.C2S, JsonRpcMessage.request(2, "tools/call", Map.of("name", "fetch", "query", "best pizza near me"))),
+                frame(Direction.S2C, JsonRpcMessage.result(2, Map.of("page", "second"))));
+        ReplayEngine engine = new ReplayEngine(twoInteractionFrames, false, null, true);
+        JsonRpcMessage request = JsonRpcMessage.request(1, "tools/call", Map.of("name", "fetch", "query", "best pizza near me"));
+
+        assertThat(await(engine.resolve(request)).get().result()).isEqualTo(Map.of("page", "first"));
+        assertThat(await(engine.resolve(request)).get().result()).isEqualTo(Map.of("page", "second"));
+        assertThat(await(engine.resolve(request)).get().error().code()).isEqualTo(-32603);
+    }
 }

@@ -59,7 +59,7 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 export async function startHttpReplayServer(cassettePath: string, options: ReplayOptions = {}):
     Promise<HttpReplayHandle> {
     const { frames } = await new CassetteReader(cassettePath).loadAll();
-    const engine = new ReplayEngine({ frames, semantic: options.semantic });
+    const engine = new ReplayEngine({ frames, semantic: options.semantic, consumeOnce: options.consumeOnce });
     const sessions = new SessionRegistry();
     const capture = options.capture ? openCapture(options.capture, "http") : undefined;
 

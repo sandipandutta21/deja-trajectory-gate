@@ -103,6 +103,39 @@ describe("ReplayEngine", () => {
     const engine = new ReplayEngine({ frames });
     expect(engine.recordedInteractionCount).toBe(1);
   });
+
+  describe("consumeOnce", () => {
+    it("resolves an identical request every time by default (stateless)", async () => {
+      const engine = new ReplayEngine({ frames });
+      const request = { jsonrpc: "2.0" as const, id: 1, method: "tools/call", params: { name: "fetch", url: "https://example.com/page" } };
+      expect((await engine.resolve(request))?.result).toEqual({ ok: true });
+      expect((await engine.resolve({ ...request, id: 2 }))?.result).toEqual({ ok: true });
+    });
+
+    it("with consumeOnce, a second identical request misses once the one recorded interaction is used", async () => {
+      const engine = new ReplayEngine({ frames, consumeOnce: true });
+      const request = { jsonrpc: "2.0" as const, id: 1, method: "tools/call", params: { name: "fetch", url: "https://example.com/page" } };
+      expect((await engine.resolve(request))?.result).toEqual({ ok: true });
+      const second = await engine.resolve({ ...request, id: 2 });
+      expect(second?.error?.code).toBe(-32603);
+    });
+
+    it("with consumeOnce and two recorded identical interactions, resolves in recorded order then misses", async () => {
+      const call = (id: number) => ({ jsonrpc: "2.0" as const, id, method: "tools/call", params: { name: "fetch", url: "https://example.com/page" } });
+      const twoInteractionFrames = [
+        frame("c2s", call(1)),
+        frame("s2c", { jsonrpc: "2.0", id: 1, result: { page: "first" } }),
+        frame("c2s", call(2)),
+        frame("s2c", { jsonrpc: "2.0", id: 2, result: { page: "second" } }),
+      ];
+      const engine = new ReplayEngine({ frames: twoInteractionFrames, consumeOnce: true });
+      const request = call(10);
+
+      expect((await engine.resolve({ ...request, id: 10 }))?.result).toEqual({ page: "first" });
+      expect((await engine.resolve({ ...request, id: 11 }))?.result).toEqual({ page: "second" });
+      expect((await engine.resolve({ ...request, id: 12 }))?.error?.code).toBe(-32603);
+    });
+  });
 });
 
 describe("normalizeIncoming / resolveBatch", () => {

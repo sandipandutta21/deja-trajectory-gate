@@ -22,6 +22,8 @@ export interface UseCassetteOptions {
         noRedact?: boolean;
     };
     semantic?: ReplayOptions["semantic"];
+    /** See `ReplayEngineOptions.consumeOnce` -- default `false` (stateless matching). */
+    consumeOnce?: boolean;
 }
 
 type RequestHandler = (method: string, params?: unknown) => Promise<any>;
@@ -114,7 +116,7 @@ export function useCassette(cassettePath: string, options: UseCassetteOptions) {
     const enginePromise: Promise<ReplayEngine> | null =
         mode === "replay"
             ? new CassetteReader(cassettePath).loadAll().then(({ frames }) => new ReplayEngine({ frames, semantic:
-                options.semantic }))
+                options.semantic, consumeOnce: options.consumeOnce }))
             : null;
 
     let recordingSession: RecordingSession | null = null;

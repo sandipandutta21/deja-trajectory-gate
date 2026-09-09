@@ -40,10 +40,15 @@ public class Alignment {
         }
     }
 
-    /** Dominates any achievable sum of raw [0,1] scores at the "few hundred steps" scale this
-     *  is built for -- so "maximize accepted matches" always outranks "maximize total score" in
-     *  the scalarized objective, however the DP/assignment actually sums it. */
-    private final double ACCEPTED_WEIGHT = 1e9;
+    /** Derives a per-call acceptance weight that provably dominates: since every raw score is
+     *  in [0,1], a value strictly greater than the number of steps being aligned always
+     *  outweighs any achievable sum of non-accepted scores (plus the negligible indel-penalty
+     *  total), so "maximize accepted matches" always outranks "maximize total score" in the
+     *  scalarized objective -- for this call's actual input size, not an arbitrary constant
+     *  sized for the largest input anyone might ever pass. */
+    private double acceptedWeightFor(int rowCount, int colCount) {
+        return rowCount + colCount + 1;
+    }
 
     /** Per-operation cost, small enough never to outweigh a single unit of score, present only
      *  to break ties toward fewer insertions/deletions. */
@@ -65,6 +70,7 @@ public class Alignment {
     public List<AlignedPair> alignStrict(List<TrajectoryStep> golden, List<TrajectoryStep> actual, double threshold) {
         int n = golden.size();
         int m = actual.size();
+        double acceptedWeight = acceptedWeightFor(n, m);
 
         double[][] dp = new double[n + 1][m + 1];
         Move[][] choice = new Move[n + 1][m + 1];
@@ -96,7 +102,7 @@ public class Alignment {
                 Pairing.PairScore pair = Pairing.scorePair(goldenStep, actualStep, threshold);
                 if (pair != null) {
                     double matchValue = dp[i - 1][j - 1]
-                            + (pair.accepted() ? ACCEPTED_WEIGHT : 0)
+                            + (pair.accepted() ? acceptedWeight : 0)
                             + pair.score()
                             - INDEX_TIEBREAK_EPSILON * (goldenStep.index() + actualStep.index());
                     // Tie-break: a match is always preferred to leaving both sides unaligned.
@@ -182,6 +188,7 @@ public class Alignment {
             boolean transpose = g.size() > a.size();
             List<TrajectoryStep> rows = transpose ? a : g;
             List<TrajectoryStep> cols = transpose ? g : a;
+            double acceptedWeight = acceptedWeightFor(rows.size(), cols.size());
 
             double[][] weights = new double[rows.size()][cols.size()];
             for (int r = 0; r < rows.size(); r++) {
@@ -189,7 +196,7 @@ public class Alignment {
                     TrajectoryStep goldenStep = transpose ? cols.get(c) : rows.get(r);
                     TrajectoryStep actualStep = transpose ? rows.get(r) : cols.get(c);
                     Pairing.PairScore pair = Pairing.scorePair(goldenStep, actualStep, threshold); // eligible by construction
-                    weights[r][c] = (pair.accepted() ? ACCEPTED_WEIGHT : 0) + pair.score()
+                    weights[r][c] = (pair.accepted() ? acceptedWeight : 0) + pair.score()
                             - INDEX_TIEBREAK_EPSILON * (goldenStep.index() + actualStep.index());
                 }
             }
@@ -279,6 +286,7 @@ public class Alignment {
             boolean transpose = missingPosList.size() > addedPosList.size();
             List<Integer> rows = transpose ? addedPosList : missingPosList;
             List<Integer> cols = transpose ? missingPosList : addedPosList;
+            double acceptedWeight = acceptedWeightFor(rows.size(), cols.size());
 
             double[][] weights = new double[rows.size()][cols.size()];
             for (int r = 0; r < rows.size(); r++) {
@@ -287,7 +295,7 @@ public class Alignment {
                     int addedPos = transpose ? rows.get(r) : cols.get(c);
                     Pairing.PairScore pair = Pairing.scorePair(
                             golden.get(pairs.get(missingPos).goldenIndex()), actual.get(pairs.get(addedPos).actualIndex()), threshold);
-                    weights[r][c] = (pair.accepted() ? ACCEPTED_WEIGHT : 0) + pair.score();
+                    weights[r][c] = (pair.accepted() ? acceptedWeight : 0) + pair.score();
                 }
             }
 

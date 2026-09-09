@@ -154,6 +154,9 @@ public final class Main {
             if (result.updated()) {
                 System.out.println("Deja: golden cassette updated with the captured session.");
             }
+        } else if (flags.has("json")) {
+            System.out.println(Json.MAPPER.writeValueAsString(Map.of(
+                    "verdict", "error", "reason", result.reason(), "exitCode", result.exitCode())));
         } else {
             System.err.println("Deja gate: harness failure -- " + result.reason());
         }

@@ -50,4 +50,11 @@ public @interface Cassette {
      * compares against a golden, it doesn't produce one.
      */
     boolean gate() default false;
+
+    /** See {@code ReplayEngine}'s {@code consumeOnce} constructor parameter -- default {@code
+     *  false} (stateless matching). Set {@code true} for VCR-style one-shot semantics: each
+     *  recorded interaction is consumed by the first request that matches it, so a genuine
+     *  duplicate call misses on its second occurrence within the test method. Has no effect in
+     *  record mode. */
+    boolean consumeOnce() default false;
 }

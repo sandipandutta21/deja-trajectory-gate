@@ -1,4 +1,4 @@
-import { NO_MATCH_ERROR_MESSAGE } from "../core/replayEngine.js";
+import { NO_MATCH_ERROR_CODE } from "../core/replayEngine.js";
 import { CassetteFrame } from "../core/types.js";
 import { TrajectorySession } from "./types.js";
 
@@ -14,7 +14,7 @@ export function detectReplaySession(frames: CassetteFrame[]): TrajectorySession 
 
     frames.forEach((frame, frameIndex) => {
         if (frame.dir !== "s2c") return;
-        if (frame.msg.error?.message !== NO_MATCH_ERROR_MESSAGE) return;
+        if (frame.msg.error?.code !== NO_MATCH_ERROR_CODE) return;
 
         replayMisses++;
         if (firstMissFrameIndex !== undefined) return;

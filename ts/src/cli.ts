@@ -100,6 +100,7 @@ async function main(): Promise<void> {
                     semantic: { type: "boolean" },
                     port: { type: "string" },
                     capture: { type: "string" },
+                    "consume-once": { type: "boolean" },
                 },
                 allowPositionals: true,
             });
@@ -112,13 +113,14 @@ async function main(): Promise<void> {
 
             const semantic = !!values.semantic;
             const capture = values.capture;
+            const consumeOnce = !!values["consume-once"];
 
             // Presence of --port picks the HTTP replay server; its absence means stdio --
             // independent of how the cassette was originally recorded (cross-transport replay).
             if (values.port !== undefined) {
-                await replayHttp(cassettePath, { semantic, port: Number(values.port), capture });
+                await replayHttp(cassettePath, { semantic, port: Number(values.port), capture, consumeOnce });
             } else {
-                await replayStdio(cassettePath, { semantic, capture });
+                await replayStdio(cassettePath, { semantic, capture, consumeOnce });
             }
             break;
         }
@@ -284,6 +286,8 @@ async function main(): Promise<void> {
             if (result.report) {
                 console.log(values.json ? toCanonicalJson(result.report) : renderHumanReport(result.report, goldenPath));
                 if (result.updated) console.log("Deja: golden cassette updated with the captured session.");
+            } else if (values.json) {
+                console.log(JSON.stringify({ verdict: "error", reason: result.reason, exitCode: result.exitCode }));
             } else {
                 console.error(`Deja gate: harness failure -- ${result.reason}`);
             }

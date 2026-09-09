@@ -166,4 +166,25 @@ describe("deja replay (stdio, built CLI)", () => {
 
     replay.kill();
   });
+
+  it("--consume-once misses a second identical request once the one recorded interaction is used", async () => {
+    const cassettePath = resolve(testDir, "for-consume-once.jsonl");
+    const writer = new CassetteWriter(cassettePath);
+    writer.write(header);
+    writer.write({ type: "frame", dir: "c2s", t_ms: 0, msg: { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} } });
+    writer.write({ type: "frame", dir: "s2c", t_ms: 1, msg: { jsonrpc: "2.0", id: 1, result: { tools: [] } } });
+    await writer.close();
+
+    const replay = spawn(process.execPath, [cliPath, "replay", cassettePath, "--consume-once"]);
+
+    replay.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }) + "\n");
+    const first = JSON.parse(await readOneLine(replay.stdout));
+    expect(first.result).toEqual({ tools: [] });
+
+    replay.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }) + "\n");
+    const second = JSON.parse(await readOneLine(replay.stdout));
+    expect(second.error?.code).toBe(-32603);
+
+    replay.kill();
+  });
 });

@@ -14,7 +14,7 @@ import { JsonRpcMessage, ReplayOptions } from "../core/types.js";
  */
 export async function replayStdio(cassettePath: string, options: ReplayOptions = {}): Promise<void> {
     const { frames } = await new CassetteReader(cassettePath).loadAll();
-    const engine = new ReplayEngine({ frames, semantic: options.semantic });
+    const engine = new ReplayEngine({ frames, semantic: options.semantic, consumeOnce: options.consumeOnce });
     const rl = createInterface({ input: process.stdin });
     const capture = options.capture ? openCapture(options.capture, "stdio") : undefined;
 

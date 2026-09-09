@@ -54,6 +54,8 @@ export interface ReplayOptions {
     /** When set, every inbound/outbound wire frame is tee'd (redacted, with fresh capture-local
      *  timestamps) into a cassette at this path. The golden itself is never mutated. */
     capture?: string;
+    /** See `ReplayEngineOptions.consumeOnce` -- default `false` (stateless matching). */
+    consumeOnce?: boolean;
 }
 
 export interface RecordOptions {

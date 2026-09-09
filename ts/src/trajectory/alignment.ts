@@ -15,10 +15,15 @@ export interface AlignedPair {
     reordered?: boolean;
 }
 
-/** Dominates any achievable sum of raw [0,1] scores at the "few hundred steps" scale this is
- *  built for -- so "maximize accepted matches" always outranks "maximize total score" in the
- *  scalarized objective, however the DP/assignment actually sums it. */
-const ACCEPTED_WEIGHT = 1e9;
+/** Derives a per-call acceptance weight that provably dominates: since every raw score is in
+ *  [0,1], a value strictly greater than the number of steps being aligned always outweighs any
+ *  achievable sum of non-accepted scores (plus the negligible indel-penalty total), so
+ *  "maximize accepted matches" always outranks "maximize total score" in the scalarized
+ *  objective -- for this call's actual input size, not an arbitrary constant sized for the
+ *  largest input anyone might ever pass. */
+function acceptedWeightFor(rowCount: number, colCount: number): number {
+    return rowCount + colCount + 1;
+}
 
 /** Per-operation cost, small enough never to outweigh a single unit of score, present only to
  *  break ties toward fewer insertions/deletions. */
@@ -39,6 +44,7 @@ type Move = "match" | "delete" | "insert";
 export function alignStrict(golden: TrajectoryStep[], actual: TrajectoryStep[], threshold: number): AlignedPair[] {
     const n = golden.length;
     const m = actual.length;
+    const acceptedWeight = acceptedWeightFor(n, m);
 
     const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
     const choice: Move[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill("delete"));
@@ -64,7 +70,7 @@ export function alignStrict(golden: TrajectoryStep[], actual: TrajectoryStep[], 
                 const actualStep = actual[j - 1];
                 const matchValue =
                     dp[i - 1][j - 1] +
-                    (pair.accepted ? ACCEPTED_WEIGHT : 0) +
+                    (pair.accepted ? acceptedWeight : 0) +
                     pair.score -
                     INDEX_TIEBREAK_EPSILON * (goldenStep.index + actualStep.index);
                 // Tie-break: a match is always preferred to leaving both sides unaligned.
@@ -145,13 +151,14 @@ export function alignUnordered(golden: TrajectoryStep[], actual: TrajectoryStep[
         const transpose = g.length > a.length;
         const rows = transpose ? a : g;
         const cols = transpose ? g : a;
+        const acceptedWeight = acceptedWeightFor(rows.length, cols.length);
 
         const weights = rows.map((rowStep) =>
             cols.map((colStep) => {
                 const gStep = transpose ? colStep : rowStep;
                 const aStep = transpose ? rowStep : colStep;
                 const pair = scorePair(gStep, aStep, threshold)!; // eligible by construction (same group)
-                return (pair.accepted ? ACCEPTED_WEIGHT : 0) + pair.score - INDEX_TIEBREAK_EPSILON * (gStep.index + aStep.index);
+                return (pair.accepted ? acceptedWeight : 0) + pair.score - INDEX_TIEBREAK_EPSILON * (gStep.index + aStep.index);
             })
         );
 
@@ -227,13 +234,14 @@ export function classifyReorders(
         const transpose = missingPosList.length > addedPosList.length;
         const rows = transpose ? addedPosList : missingPosList;
         const cols = transpose ? missingPosList : addedPosList;
+        const acceptedWeight = acceptedWeightFor(rows.length, cols.length);
 
         const weights = rows.map((rowPos) =>
             cols.map((colPos) => {
                 const missingPos = transpose ? colPos : rowPos;
                 const addedPos = transpose ? rowPos : colPos;
                 const pair = scorePair(golden[pairs[missingPos].goldenIndex!], actual[pairs[addedPos].actualIndex!], threshold)!;
-                return (pair.accepted ? ACCEPTED_WEIGHT : 0) + pair.score;
+                return (pair.accepted ? acceptedWeight : 0) + pair.score;
             })
         );
 
