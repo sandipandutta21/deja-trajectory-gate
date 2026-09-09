@@ -258,12 +258,42 @@ derived view over this same format — no second recording format, no cassette s
 
 ## Benchmark
 
-The matching tier ladder's actual claim, replaying semantically-equivalent-but-different requests
-without introducing dangerous false matches, is backed by a generated (not hand-padded) corpus:
-realistic base interactions across six tool families, run through role-aware transforms that only
-fire where a suitable argument exists, each producing an explicit ground-truth label and rationale.
-Trajectory Gate's own pass/fail calls are only as trustworthy as this replay layer, which is why
-this number is the one to check before trusting a gate result.
+Trajectory Gate's actual claim is that its pass/fail verdict on a whole multi-step run is
+trustworthy — specifically, that it doesn't silently pass a genuine behavioral regression. That's
+backed by a generated corpus, not the 10 hand-authored conformance vectors: 10 realistic
+multi-step agent flows across six tool families (filesystem, database, GitHub, financial, generic
+API, protocol-level), each run through transforms — identical, tolerated argument noise, genuine
+reorders, dropped/added/duplicated calls, dangerous argument drift, tool swaps, policy
+required/prohibited checks — scored against every comparison mode that transform is actually
+meant to exercise.
+
+```
+Trajectory Gate Benchmark v1
+
+1,520 labeled golden/actual trajectory pairs
+
+Precision    Recall    False Positives
+100.0%       98.9%       0.0%
+```
+
+**Precision** = of trajectories the gate passed, how many were genuinely fine. **Recall** = of
+genuinely fine trajectories, how many the gate correctly passed (the other 1.1% are false alarms
+on a benign variation — costs a rerun, not a regression). **False positives** = of genuine
+divergences (a dropped call, a swapped tool, a 10x change to a money transfer, a prohibited
+call), how many the gate silently passed anyway — the number that matters most, because that's a
+regression that ships to CI with no red flag, and this benchmark found zero. The by-category
+breakdown, the one known limitation it did surface (an optional argument added to an
+otherwise-empty-params call, e.g. `tools/list`, can score just under threshold — the same gap
+`benchmarks/RESULTS.md` already documents at the single-request layer, not a new one), and every
+disagreement, are in
+[`ts/benchmarks/TRAJECTORY-RESULTS.md`](ts/benchmarks/TRAJECTORY-RESULTS.md). The corpus generator
+is in
+[`ts/benchmarks/trajectory-corpus.mjs`](ts/benchmarks/trajectory-corpus.mjs); regenerate with
+`npm run benchmark:trajectory` from `ts/`.
+
+That trajectory-level verdict is only as trustworthy as the request-matching layer underneath it
+— the tier ladder deciding whether one recorded request and one incoming request are "the same
+call" in the first place. That's backed by its own, larger generated corpus:
 
 ```
 Replay Benchmark v1
@@ -282,21 +312,20 @@ Tested across:
 ✓ Dangerous near-misses (tool-name swaps, path/URI near-misses, numeric drift, opaque IDs)
 ```
 
-False-positive rate is the number that matters most: a wrong match means replaying the wrong
-tool's result, or worse, a mutating call with different arguments silently looking "already
-handled." The full report, including a by-category breakdown and, honestly, the two specific
-kinds of case the deterministic tier still can't safely catch (small-magnitude-but-consequential
-numeric drift, and opaque identifiers like UUIDs/emails/hashes that aren't path/URI-shaped), is
-in [`ts/benchmarks/RESULTS.md`](ts/benchmarks/RESULTS.md). The corpus generator, every transform,
-and the rationale behind each category is in [`ts/benchmarks/corpus.mjs`](ts/benchmarks/corpus.mjs);
-regenerate with `npm run benchmark` from `ts/`.
+The full report, including a by-category breakdown and, honestly, the two specific kinds of case
+the deterministic tier still can't safely catch (small-magnitude-but-consequential numeric drift,
+and opaque identifiers like UUIDs/emails/hashes that aren't path/URI-shaped), is in
+[`ts/benchmarks/RESULTS.md`](ts/benchmarks/RESULTS.md). The corpus generator, every transform, and
+the rationale behind each category is in
+[`ts/benchmarks/corpus.mjs`](ts/benchmarks/corpus.mjs); regenerate with `npm run benchmark` from
+`ts/`.
 
-Trajectory Gate itself carries its own conformance bar: all 10 comparison vectors in
-[`conformance/trajectory/`](conformance/trajectory/) — exact match, tolerated drift, drifted,
-reordered, duplicate calls, unordered ambiguity, subset, superset, replay-frontier, and
-threshold-boundary cases — produce tree-identical JSON reports in both TypeScript and Java, `npx
-vitest run` reports 201/201 passing, and `./gradlew build` is clean across all three Java modules
-(`deja-core`, `deja-junit5`, `cli`).
+Trajectory Gate also carries a smaller, exact conformance bar on top of both benchmarks above:
+all 10 hand-authored comparison vectors in [`conformance/trajectory/`](conformance/trajectory/) —
+exact match, tolerated drift, drifted, reordered, duplicate calls, unordered ambiguity, subset,
+superset, replay-frontier, and threshold-boundary cases — produce tree-identical JSON reports in
+both TypeScript and Java, `npx vitest run` reports 201/201 passing, and `./gradlew build` is
+clean across all three Java modules (`deja-core`, `deja-junit5`, `cli`).
 
 ## License
 

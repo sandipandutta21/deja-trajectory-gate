@@ -28,6 +28,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "benchmark": "npm run build && node benchmarks/run.mjs",
+    "benchmark:trajectory": "npm run build && node benchmarks/trajectory-run.mjs",
     "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
