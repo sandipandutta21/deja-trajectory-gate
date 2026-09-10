@@ -79,6 +79,16 @@ export function maxWeightAssignment(weights: number[][]): number[] {
     if (rows > cols) {
         throw new Error("maxWeightAssignment requires rows <= cols; transpose before calling");
     }
+    for (let i = 0; i < rows; i++) {
+        if (weights[i].length !== cols) {
+            throw new Error(`maxWeightAssignment requires a rectangular matrix -- row 0 has ${cols} columns, row ${i} has ${weights[i].length}`);
+        }
+        for (let j = 0; j < cols; j++) {
+            if (!Number.isFinite(weights[i][j])) {
+                throw new Error(`maxWeightAssignment requires finite weights -- weights[${i}][${j}] is ${weights[i][j]}`);
+            }
+        }
+    }
 
     const cost = weights.map((row) => row.map((w) => -w));
     return hungarianMinCost(cost);

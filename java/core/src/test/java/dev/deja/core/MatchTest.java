@@ -269,4 +269,39 @@ class MatchTest {
 
         assertThat(await(Match.findSemanticMatch(incoming, options))).isEmpty();
     }
+
+    @Test
+    void failsClosedWhenTwoDifferentCandidatesTieForTheTopQualifyingScore() {
+        JsonRpcMessage incoming = toolCall(1, "search", Map.of("query", "best pizza near me"));
+        // Two distinct candidates with byte-identical message content score identically against
+        // any given incoming message -- a guaranteed, reproducible tie, not a contrived mock.
+        JsonRpcMessage tiedMsg = toolCall(2, "search", Map.of("query", "best pizza near mee"));
+        List<Candidate> candidates = List.of(new Candidate("first", tiedMsg), new Candidate("second", tiedMsg));
+
+        SemanticMatchOptions<Candidate> options = SemanticMatchOptions.<Candidate>builder()
+                .candidates(candidates)
+                .messageExtractor(Candidate::msg)
+                .threshold(0.75)
+                .build();
+
+        assertThat(await(Match.findSemanticMatch(incoming, options))).isEmpty();
+    }
+
+    @Test
+    void stillReturnsTheSoleWinnerWhenOnlyOneCandidateTiesItself() {
+        JsonRpcMessage incoming = toolCall(1, "search", Map.of("query", "best pizza near me"));
+        List<Candidate> candidates = List.of(
+                new Candidate("close", toolCall(2, "search", Map.of("query", "best pizza near mee"))),
+                new Candidate("far", toolCall(3, "search", Map.of("query", "completely unrelated topic"))));
+
+        SemanticMatchOptions<Candidate> options = SemanticMatchOptions.<Candidate>builder()
+                .candidates(candidates)
+                .messageExtractor(Candidate::msg)
+                .threshold(0.75)
+                .build();
+
+        Optional<Candidate> match = await(Match.findSemanticMatch(incoming, options));
+        assertThat(match).isPresent();
+        assertThat(match.get().id()).isEqualTo("close");
+    }
 }

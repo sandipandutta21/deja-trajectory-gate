@@ -73,7 +73,7 @@ public class Compare {
      *  tolerate neither). */
     private boolean isSequenceFailure(StepOutcome outcome, TrajectoryMode mode) {
         // Still a failure: the label improves diagnosis only, it never changes gate semantics.
-        // classifyReorders only ever fires in strict mode, where this was already going to
+        // annotateReorders only ever fires in strict mode, where this was already going to
         // fail as disconnected missing/added entries.
         if (outcome == StepOutcome.DRIFTED || outcome == StepOutcome.REORDERED) {
             return true;
@@ -203,7 +203,7 @@ public class Compare {
         }
 
         List<AlignedPair> pairs = mode == TrajectoryMode.STRICT
-                ? Alignment.classifyReorders(Alignment.alignStrict(golden, actual, threshold), golden, actual, threshold)
+                ? Alignment.annotateReorders(Alignment.alignStrict(golden, actual, threshold), golden, actual, threshold)
                 : Alignment.alignUnordered(golden, actual, threshold);
         return buildSequenceReport(mode, threshold, golden, actual, pairs, session);
     }

@@ -405,15 +405,22 @@ public class Match {
 
         T best = null;
         double bestScore = 0;
+        // True when a *different* candidate ties the current best score -- picking either would
+        // be arbitrary, so this fails closed (treated as no match) rather than silently keeping
+        // whichever was scanned first.
+        boolean ambiguous = false;
         List<ScoredCandidate<T>> uncertain = new ArrayList<>();
 
         for (T candidate : options.getCandidates()) {
             double score = calculateSimilarity(incoming, options.getMessageExtractor().apply(candidate));
 
             if (score >= threshold) {
-                if (score > bestScore) {
+                if (best == null || score > bestScore) {
                     bestScore = score;
                     best = candidate;
+                    ambiguous = false;
+                } else if (score == bestScore) {
+                    ambiguous = true;
                 }
             } else if (options.getJudge() != null && score >= threshold - JUDGE_BAND_WIDTH) {
                 uncertain.add(new ScoredCandidate<>(candidate, score));
@@ -421,7 +428,7 @@ public class Match {
         }
 
         if (best != null) {
-            return CompletableFuture.completedFuture(Optional.of(best));
+            return CompletableFuture.completedFuture(ambiguous ? Optional.empty() : Optional.of(best));
         }
         if (options.getJudge() == null || uncertain.isEmpty()) {
             return CompletableFuture.completedFuture(Optional.empty());

@@ -8,7 +8,7 @@ export interface AlignedPair {
     actualIndex?: number;
     score?: number;
     tier?: MatchingTier;
-    /** Set only by {@link classifyReorders}: this pair was originally two disconnected
+    /** Set only by {@link annotateReorders}: this pair was originally two disconnected
      *  missing/added entries, merged because they'd have scored an accepted match against each
      *  other. Distinguishes "the DP genuinely matched this in place" from "these were relabeled
      *  after the fact" for {@link classifySequencePair}. */
@@ -198,7 +198,7 @@ export function alignUnordered(golden: TrajectoryStep[], actual: TrajectoryStep[
  * ever be eligible within one group anyway; each group is its own small assignment problem so a
  * missing step is never merged with more than one added step, or vice versa.
  */
-export function classifyReorders(
+export function annotateReorders(
     pairs: AlignedPair[],
     golden: TrajectoryStep[],
     actual: TrajectoryStep[],

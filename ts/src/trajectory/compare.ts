@@ -1,5 +1,5 @@
 import { CassetteFrame } from "../core/types.js";
-import { AlignedPair, alignStrict, alignUnordered, classifyReorders } from "./alignment.js";
+import { AlignedPair, alignStrict, alignUnordered, annotateReorders } from "./alignment.js";
 import { extractTrajectory } from "./extract.js";
 import { detectReplaySession } from "./frontier.js";
 import { derivePolicy, findAllPolicyMatches, findPolicyMatch, isCoveredByAnyMatcher } from "./policy.js";
@@ -78,7 +78,7 @@ function classifySequencePair(
  *  unmatched golden, superset tolerates unmatched actual, strict/unordered tolerate neither). */
 function isSequenceFailure(outcome: StepOutcome, mode: TrajectoryMode): boolean {
     // Still a failure: the label improves diagnosis only, it never changes gate semantics.
-    // classifyReorders only ever fires in strict mode, where this was already going to fail
+    // annotateReorders only ever fires in strict mode, where this was already going to fail
     // as disconnected missing/added entries.
     if (outcome === "drifted" || outcome === "reordered") return true;
     if (outcome === "missing") return mode !== "subset";
@@ -232,7 +232,7 @@ export function compareTrajectories(
 
     const pairs =
         mode === "strict"
-            ? classifyReorders(alignStrict(golden, actual, threshold), golden, actual, threshold)
+            ? annotateReorders(alignStrict(golden, actual, threshold), golden, actual, threshold)
             : alignUnordered(golden, actual, threshold);
     return buildSequenceReport(mode, threshold, golden, actual, pairs, session);
 }

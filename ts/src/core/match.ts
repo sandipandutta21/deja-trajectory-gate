@@ -297,22 +297,29 @@ export async function findSemanticMatch<T>(
 
     let best: T | null = null;
     let bestScore = 0;
+    // True when a *different* candidate ties the current best score -- picking either would be
+    // arbitrary, so this fails closed (treated as no match) rather than silently keeping
+    // whichever was scanned first.
+    let ambiguous = false;
     const uncertain: Array<{ candidate: T; score: number }> = [];
 
     for (const candidate of options.candidates) {
         const score = calculateSimilarity(incoming, options.getMessage(candidate));
 
         if (score >= threshold) {
-            if (score > bestScore) {
+            if (best === null || score > bestScore) {
                 bestScore = score;
                 best = candidate;
+                ambiguous = false;
+            } else if (score === bestScore) {
+                ambiguous = true;
             }
         } else if (options.judge && score >= threshold - JUDGE_BAND_WIDTH) {
             uncertain.push({ candidate, score });
         }
     }
 
-    if (best) return best;
+    if (best) return ambiguous ? null : best;
     if (!options.judge || uncertain.length === 0) return null;
 
     uncertain.sort((a, b) => b.score - a.score);

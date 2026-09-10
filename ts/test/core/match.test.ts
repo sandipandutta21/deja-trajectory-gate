@@ -229,4 +229,29 @@ describe("findSemanticMatch", () => {
 
     expect(match).toBeNull();
   });
+
+  it("fails closed (returns null) when two different candidates tie for the top qualifying score", async () => {
+    const incoming: JsonRpcMessage = { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "search", query: "best pizza near me" } };
+    // Two distinct candidates with byte-identical message content score identically against
+    // any given incoming message -- a guaranteed, reproducible tie, not a contrived mock.
+    const tiedMsg: JsonRpcMessage = { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "search", query: "best pizza near mee" } };
+    const candidates: Candidate[] = [
+      { id: "first", msg: tiedMsg },
+      { id: "second", msg: tiedMsg },
+    ];
+
+    const match = await findSemanticMatch(incoming, { candidates, getMessage, threshold: 0.75 });
+    expect(match).toBeNull();
+  });
+
+  it("still returns the sole winner when only one candidate ties itself (no ambiguity)", async () => {
+    const incoming: JsonRpcMessage = { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "search", query: "best pizza near me" } };
+    const candidates: Candidate[] = [
+      { id: "close", msg: { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "search", query: "best pizza near mee" } } },
+      { id: "far", msg: { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "search", query: "completely unrelated topic" } } },
+    ];
+
+    const match = await findSemanticMatch(incoming, { candidates, getMessage, threshold: 0.75 });
+    expect(match?.id).toBe("close");
+  });
 });

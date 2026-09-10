@@ -103,6 +103,17 @@ public class Hungarian {
         if (rows > cols) {
             throw new IllegalArgumentException("maxWeightAssignment requires rows <= cols; transpose before calling");
         }
+        for (int i = 0; i < rows; i++) {
+            if (weights[i].length != cols) {
+                throw new IllegalArgumentException(
+                        "maxWeightAssignment requires a rectangular matrix -- row 0 has " + cols + " columns, row " + i + " has " + weights[i].length);
+            }
+            for (int j = 0; j < cols; j++) {
+                if (!Double.isFinite(weights[i][j])) {
+                    throw new IllegalArgumentException("maxWeightAssignment requires finite weights -- weights[" + i + "][" + j + "] is " + weights[i][j]);
+                }
+            }
+        }
 
         double[][] cost = new double[rows][cols];
         for (int i = 0; i < rows; i++) {
