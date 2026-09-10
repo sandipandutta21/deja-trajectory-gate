@@ -52,11 +52,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # 21, not 17: this is the JVM Gradle *itself* runs on to evaluate buildSrc (whose
+      # kotlin-dsl build script needs jvmToolchain(21) -- see buildSrc/build.gradle.kts).
+      # The actual published artifacts still target Java 17 via their own toolchain
+      # declaration (dev.deja.java-conventions.gradle.kts); the foojay-resolver-convention
+      # plugin auto-provisions that JDK 17 toolchain separately during the build below.
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
 
       - name: Set up Node
         uses: actions/setup-node@v4
