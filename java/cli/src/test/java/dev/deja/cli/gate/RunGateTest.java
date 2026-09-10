@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class RunGateTest {
 
@@ -120,26 +121,21 @@ class RunGateTest {
         assertThat(frames.get(1).msg().result()).isEqualTo(Map.of("tools", List.of()));
     }
 
-    // Windows' read-only file attribute doesn't reliably block the owning process from
-    // overwriting a file the way POSIX permissions do -- this is a real test on Linux/macOS,
-    // including the Linux CI runner this repo actually gates on, but not reproducible on a
-    // Windows dev machine.
+    // A read-only file attribute is not portable evidence of a write failure: GitHub Actions'
+    // Linux CI runner executes as root, which bypasses standard POSIX permission checks
+    // entirely, so setReadOnly() would silently have no effect there instead of reproducing
+    // the failure this test means to exercise. A nonexistent parent directory is a structural
+    // ENOENT no privilege level bypasses -- deterministic on every platform. Exercised directly
+    // against promoteCapture (package-private specifically for this), not through the full
+    // run() pipeline, which has no way to make the initial read succeed and the very next
+    // write to that same path fail without a timing-dependent hack.
     @Test
-    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
-    void updateFailsCleanlyInsteadOfCrashingWhenTheGoldenFileCantBeWritten() throws java.io.IOException {
-        Path golden = writeGolden("update-write-failure.jsonl");
-        golden.toFile().setReadOnly();
-        try {
-            RunGate.Result result = RunGate.run(golden, fixtureAgent("happy"), RunGate.Options.builder()
-                    .compareOptions(CompareOptions.builder().build())
-                    .update(true)
-                    .build());
+    void promoteCaptureThrowsInsteadOfSilentlyFailingWhenTheTargetDirectoryDoesNotExist() {
+        Path capturePath = writeGolden("capture-for-promote-failure.jsonl");
+        CassetteHeader header = new CassetteReader(capturePath).loadAll().header();
+        Path missingDirGoldenPath = tempDir.resolve("no-such-directory").resolve("golden.jsonl");
 
-            assertThat(result.exitCode()).isEqualTo(3);
-            assertThat(result.reasonCode()).isEqualTo(ReasonCode.UPDATE_WRITE_FAILED);
-            assertThat(result.reason()).contains("Failed to update golden cassette");
-        } finally {
-            golden.toFile().setWritable(true);
-        }
+        assertThatThrownBy(() -> RunGate.promoteCapture(missingDirGoldenPath, header, capturePath))
+                .isInstanceOf(RuntimeException.class);
     }
 }

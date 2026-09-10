@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { existsSync } from "node:fs";
-import { chmod, mkdir, rm } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { CassetteReader, CassetteWriter } from "../../src/core/cassette.js";
-import { runGate } from "../../src/gate/run.js";
+import { promoteCapture, runGate } from "../../src/gate/run.js";
 import { CassetteLine } from "../../src/core/types.js";
 import { writeScriptFile } from "../helpers/fakeServer.js";
 
@@ -121,23 +121,20 @@ describe("runGate", () => {
         expect(frames.find((f) => f.dir === "s2c")?.msg.result).toEqual({ tools: [] });
     });
 
-    // Windows' chmod doesn't reliably block a write the way POSIX permissions do (the file's
-    // owning process can often still overwrite a "read-only"-attributed file) -- this is a real
-    // test on Linux/macOS, including the Linux CI runner this repo actually gates on, but not
-    // reproducible on this dev machine.
-    it.skipIf(process.platform === "win32")(
-        "--update fails cleanly (not an unhandled rejection) when the golden file can't be written",
-        async () => {
-            const golden = await writeGolden("update-write-failure.jsonl");
-            await chmod(golden, 0o444); // read-only, so promoteCapture's rewrite fails
-            try {
-                const result = await runGate(golden, happyAgent, { update: true });
-                expect(result.exitCode).toBe(3);
-                expect(result.reasonCode).toBe("update-write-failed");
-                expect(result.reason).toContain("Failed to update golden cassette");
-            } finally {
-                await chmod(golden, 0o644); // restore so afterAll's rm() can clean up testDir
-            }
-        }
-    );
+    // chmod-based "make it read-only" turned out not to be portable evidence of a write
+    // failure -- GitHub Actions' Linux CI runner executes as root, which bypasses standard
+    // POSIX permission checks entirely, so that approach silently passed there instead of
+    // reproducing the failure it was meant to test. A nonexistent parent directory is a
+    // structural ENOENT no privilege level bypasses -- deterministic on every platform,
+    // exercised directly against promoteCapture (the exact operation runGate's try/catch
+    // wraps) rather than through the full runGate pipeline, which has no way to make read
+    // succeed and the very next write to the same path fail without a timing-dependent hack.
+    it("promoteCapture throws instead of silently failing when the target directory doesn't exist", async () => {
+        const capturePath = await writeGolden("capture-for-promote-failure.jsonl");
+        const { header } = await new CassetteReader(capturePath).loadAll();
+        const missingDirGoldenPath = resolve(testDir, "no-such-directory", "golden.jsonl");
+
+        await expect(promoteCapture(missingDirGoldenPath, header, capturePath)).rejects.toThrow();
+    });
+
 });

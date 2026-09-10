@@ -13,10 +13,17 @@ export class CassetteWriter {
         this.stream.write(JSON.stringify(line) + "\n");
     }
 
+    /** Resolves on the stream's `close` event, not the `end()` callback ("finish") -- a
+     *  stream whose underlying file never actually opened (e.g. the target directory doesn't
+     *  exist) still fires its `end()` callback *before* the resulting `error` event, so
+     *  resolving there would silently swallow a real write failure. `error` reliably fires
+     *  before `close` (verified directly, not assumed), so listening for both and letting
+     *  whichever settles the promise first win is safe here. */
     async close(): Promise<void> {
         return new Promise((resolve, reject) => {
-            this.stream.end(() => resolve());
             this.stream.on("error", reject);
+            this.stream.on("close", () => resolve());
+            this.stream.end();
         });
     }
 }

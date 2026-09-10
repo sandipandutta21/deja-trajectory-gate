@@ -68,6 +68,14 @@ jobs:
         with:
           node-version: "20"
 
+      # Several Java tests (RealServerFilesystemTest, RealServerEverythingTest,
+      # RealServerEverythingSessionTest) spawn the official MCP reference servers straight out
+      # of ts/node_modules rather than duplicating them as Java dependencies -- this job's
+      # checkout is otherwise a completely separate, unpopulated ts/ tree from the TS job's.
+      - name: Install TS dependencies (real MCP reference servers Java's tests spawn)
+        working-directory: ts
+        run: npm ci
+
       # Runs the full Gradle build across all three modules (deja-core, deja-junit5, cli),
       # including TrajectoryConformanceTest against the committed conformance/trajectory/*
       # fixtures (produced by ts/scripts/generate-trajectory-conformance.mjs) -- this is what

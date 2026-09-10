@@ -128,8 +128,9 @@ public final class RunGate {
      *  target} describe the *original* upstream, still meaningful context even though this
      *  promoted cassette was captured via replay-and-tee rather than a live recording) while
      *  stamping a fresh {@code recordedAt}. The capture is already redacted by the capture tee
-     *  itself. */
-    private static void promoteCapture(Path goldenPath, CassetteHeader oldHeader, Path capturePath) {
+     *  itself. Package-private, not private -- so {@code RunGateTest} can exercise its failure
+     *  path directly (a nonexistent target directory), independent of {@link #run}. */
+    static void promoteCapture(Path goldenPath, CassetteHeader oldHeader, Path capturePath) {
         CassetteContents captured = new CassetteReader(capturePath).loadAll();
         try (CassetteWriter writer = new CassetteWriter(goldenPath)) {
             writer.write(CassetteHeader.of(Instant.now().toString(), TransportType.HTTP, oldHeader.serverCommand(), oldHeader.target()));
