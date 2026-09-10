@@ -100,17 +100,38 @@ class MainGateJsonTest {
         command.addAll(javaCommand("dev.deja.cli.FixtureAgentMain", "hanging"));
 
         Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
-        // Give it a moment to actually start the replay server and spawn the agent.
-        Thread.sleep(1000);
-        List<ProcessHandle> descendants = process.toHandle().descendants().toList();
-        assertThat(descendants).isNotEmpty(); // the FixtureAgentMain JVM should be running by now
-        ProcessHandle agentHandle = descendants.get(0);
+        // Poll rather than a single fixed sleep -- a shared/slower CI runner can easily take
+        // longer than a local dev machine to start the JVM, bind the replay server, and spawn
+        // the agent; a one-shot sleep that happens to be long enough locally is exactly the
+        // kind of thing that's flaky in CI, not a fixed amount of extra safety margin.
+        ProcessHandle agentHandle = pollUntilPresent(() -> process.toHandle().descendants().findFirst(), java.time.Duration.ofSeconds(15));
 
         process.destroy(); // SIGTERM-equivalent -- triggers Lifecycle's shutdown hook
-        assertThat(process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+        assertThat(process.waitFor(15, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
 
-        // Give the forwarded signal a brief moment to actually take effect.
-        Thread.sleep(500);
-        assertThat(agentHandle.isAlive()).isFalse();
+        pollUntilTrue(() -> !agentHandle.isAlive(), java.time.Duration.ofSeconds(10));
+    }
+
+    private static <T> T pollUntilPresent(java.util.function.Supplier<java.util.Optional<T>> probe, java.time.Duration timeout) throws InterruptedException {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (System.nanoTime() < deadline) {
+            java.util.Optional<T> result = probe.get();
+            if (result.isPresent()) {
+                return result.get();
+            }
+            Thread.sleep(50);
+        }
+        throw new AssertionError("Condition never became true within " + timeout);
+    }
+
+    private static void pollUntilTrue(java.util.function.BooleanSupplier condition, java.time.Duration timeout) throws InterruptedException {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (System.nanoTime() < deadline) {
+            if (condition.getAsBoolean()) {
+                return;
+            }
+            Thread.sleep(50);
+        }
+        throw new AssertionError("Condition never became true within " + timeout);
     }
 }
