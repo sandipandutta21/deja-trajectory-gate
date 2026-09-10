@@ -11,7 +11,7 @@ Cases by mode: `policy`: 200, `strict`: 910, `subset`: 100, `superset`: 200, `un
 | Precision (of trajectories the gate passed, how many were genuinely fine) | 100.0% |
 | Recall (of genuinely fine trajectories, how many the gate correctly passed) | 98.9% |
 | False-positive rate (of genuine divergences, how many the gate silently passed) | 0.0% |
-| Avg. latency per `compareTrajectories` call | 40.59 µs |
+| Avg. latency per `compareTrajectories` call | 39.06 µs |
 
 **False-positive rate is the number that matters most here**: it's the fraction of genuine behavioral divergences (a dropped call, a swapped tool, a 10x change to a money transfer, a prohibited call) that the gate let through as "passed" anyway -- a regression that ships to CI with no red flag. A false alarm (the other kind of mistake, counted in recall) costs a few minutes rerunning a gate on a benign variation; a false positive here costs a silent regression.
 
@@ -56,4 +56,15 @@ All 10 disagreements below are the same known case, not 10 different bugs: addin
 | `list-read-7__tolerated_optional_param_added[strict]` | tolerated_optional_param_added | strict | PASS | FAIL |
 | `list-read-8__tolerated_optional_param_added[strict]` | tolerated_optional_param_added | strict | PASS | FAIL |
 | `list-read-9__tolerated_optional_param_added[strict]` | tolerated_optional_param_added | strict | PASS | FAIL |
+
+## Scale (one-off, hand-run only -- not part of the default benchmark or CI)
+
+A single golden/actual pair per size, every step sharing one `(method, toolName)` group under `unordered` mode -- the real O(n³) Hungarian path, not an artificially-fast multi-group case. Run with `node benchmarks/trajectory-run.mjs --scale`; not run by default because 1,000 steps in one group is deliberately slow.
+
+| Steps per side | `compareTrajectories` latency |
+|---:|---:|
+| 100 | 293.1 ms |
+| 500 | 7648.7 ms |
+| 1000 | 30424.7 ms |
+
 

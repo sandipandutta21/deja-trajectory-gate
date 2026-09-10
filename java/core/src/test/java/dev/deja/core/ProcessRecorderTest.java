@@ -68,7 +68,7 @@ class ProcessRecorderTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void redactsASecretEmbeddedInTheLiveRoundTripWithoutAlteringWhatTheCallerSaw(@TempDir Path tempDir) {
+    void redactsASecretEmbeddedInTheLiveRoundTripWithoutAlteringWhatTheCallerSaw(@TempDir Path tempDir) throws java.io.IOException {
         Path cassettePath = tempDir.resolve("redacted.jsonl");
         String secret = "sk-abc123def456ghi789jkl012mno345pqr678stu901";
 
@@ -83,6 +83,11 @@ class ProcessRecorderTest {
         Map<String, Object> recordedParams = contents.frames().get(0).msg().params();
         assertThat((String) recordedParams.get("message")).doesNotContain(secret);
         assertThat((String) recordedParams.get("message")).matches(".*\\[REDACTED:sk:[a-f0-9]{8}].*");
+
+        // Stronger than "the parsed field doesn't contain it": the literal secret string is
+        // provably absent from the file's raw bytes, not just from the field we happened to check.
+        String rawFileContents = java.nio.file.Files.readString(cassettePath);
+        assertThat(rawFileContents).doesNotContain(secret);
     }
 
     @Test

@@ -17,7 +17,8 @@ public enum ReasonCode {
     AGENT_EXIT_NONZERO("agent-exit-nonzero"),
     CAPTURE_READ_FAILED("capture-read-failed"),
     NO_CAPTURE("no-capture"),
-    UPDATE_WRITE_FAILED("update-write-failed");
+    UPDATE_WRITE_FAILED("update-write-failed"),
+    CLEANUP_FAILED("cleanup-failed");
 
     private final String wireValue;
 

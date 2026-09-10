@@ -6,7 +6,7 @@
 //
 // This is a one-off, hand-run report, not a CI gate -- same reasoning as the matching benchmark.
 
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { compareTrajectories } from "../dist/trajectory/compare.js";
@@ -184,6 +184,64 @@ if (process.argv.includes("--check")) {
     console.log("\nBenchmark regression check passed.");
 }
 
+// One-off, hand-run-only scale measurement (never part of the default run or CI's --check
+// step): a single golden/actual pair, all steps sharing one (method, toolName) group, under
+// `unordered` mode -- the actual O(n^3) Hungarian path, not an artificially-fast multi-group
+// case. Honest worst-case numbers at these sizes, not a regression gate.
+function measureScale(n) {
+    const step = (i, argSuffix) => ({
+        index: i,
+        method: "tools/call",
+        toolName: "search",
+        params: { name: "search", arguments: { query: `query number ${i}${argSuffix}` } },
+        frameIndex: i,
+        tMs: i,
+    });
+    const golden = Array.from({ length: n }, (_, i) => step(i, ""));
+    const actual = Array.from({ length: n }, (_, i) => step(i, " actual")); // slightly perturbed, realistic
+    const start = process.hrtime.bigint();
+    compareTrajectories(golden, actual, { mode: "unordered" });
+    return Number(process.hrtime.bigint() - start) / 1e6; // ms
+}
+
+if (process.argv.includes("--scale")) {
+    const sizes = [100, 500, 1000];
+    const lines = ["", "## Scale (one-off, hand-run only -- not part of the default benchmark or CI)", ""];
+    lines.push(
+        "A single golden/actual pair per size, every step sharing one `(method, toolName)` " +
+            "group under `unordered` mode -- the real O(n³) Hungarian path, not an " +
+            "artificially-fast multi-group case. Run with `node benchmarks/trajectory-run.mjs " +
+            "--scale`; not run by default because 1,000 steps in one group is deliberately slow."
+    );
+    lines.push("");
+    lines.push("| Steps per side | `compareTrajectories` latency |");
+    lines.push("|---:|---:|");
+    for (const n of sizes) {
+        const ms = measureScale(n);
+        console.log(`scale n=${n}: ${ms.toFixed(1)}ms`);
+        lines.push(`| ${n} | ${ms.toFixed(1)} ms |`);
+    }
+    lines.push("");
+
+    const existing = readFileSync(join(__dirname, "TRAJECTORY-RESULTS.md"), "utf8");
+    const withoutOldScale = existing.replace(/\n## Scale \(one-off[\s\S]*$/, "\n");
+    writeFileSync(join(__dirname, "TRAJECTORY-RESULTS.md"), withoutOldScale.trimEnd() + "\n" + lines.join("\n"));
+    console.log(`\nAppended scale numbers to ${join(__dirname, "TRAJECTORY-RESULTS.md")}`);
+    process.exit(0);
+}
+
+// Preserve a previously hand-run --scale section rather than silently dropping it every time
+// the main (fast, correctness-only) report regenerates -- the two are independent appendages
+// to the same file, not one atomic report.
+let existingScaleSection = "";
+try {
+    const existing = readFileSync(join(__dirname, "TRAJECTORY-RESULTS.md"), "utf8");
+    const match = existing.match(/\n(## Scale \(one-off[\s\S]*)$/);
+    if (match) existingScaleSection = "\n" + match[1];
+} catch {
+    // No prior file (first run) -- nothing to preserve.
+}
+
 const report = buildReport(results);
-writeFileSync(join(__dirname, "TRAJECTORY-RESULTS.md"), report + "\n");
+writeFileSync(join(__dirname, "TRAJECTORY-RESULTS.md"), report.trimEnd() + "\n" + existingScaleSection + (existingScaleSection ? "\n" : ""));
 console.log(`\nWrote ${join(__dirname, "TRAJECTORY-RESULTS.md")}`);

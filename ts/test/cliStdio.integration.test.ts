@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, readFile, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { CassetteReader, CassetteWriter } from "../src/core/cassette.js";
 import { CassetteLine } from "../src/core/types.js";
@@ -64,6 +64,11 @@ describe("deja record (stdio, built CLI)", () => {
 
     const s2c = frames.find((f) => f.dir === "s2c");
     expect(s2c?.msg.result).toEqual({ echoed: "tools/list" });
+
+    // Stronger than "matches the redacted pattern": the literal secret string is provably
+    // absent from the file's raw bytes, not just absent from the parsed field we happened to check.
+    const rawFileContents = await readFile(cassettePath, "utf8");
+    expect(rawFileContents).not.toContain("sk-abc123def456ghi789jkl012mno345pqr678stu901");
   });
 
   it("--no-redact preserves the raw secret in the cassette", async () => {

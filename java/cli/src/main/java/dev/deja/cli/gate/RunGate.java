@@ -72,11 +72,19 @@ public final class RunGate {
         try {
             agentResult = Lifecycle.runAgent(command, "http://127.0.0.1:" + server.port(), options.timeoutMs());
         } catch (IOException e) {
+            closeQuietly(server); // a close failure here shouldn't mask the more specific spawn failure
             deleteQuietly(capturePath);
             return Result.harnessFailure(ReasonCode.SPAWN_FAILED, "Failed to spawn agent command: " + e.getMessage());
-        } finally {
-            // Every exit path from here closes the listener and flushes the capture.
+        }
+
+        // Every exit path from here closes the listener and flushes the capture -- but the
+        // close itself can throw (e.g. the capture tee's flush fails), so it's caught here
+        // rather than left to propagate uncaught past the cleanup below.
+        try {
             server.close();
+        } catch (RuntimeException e) {
+            deleteQuietly(capturePath);
+            return Result.harnessFailure(ReasonCode.CLEANUP_FAILED, "Failed to close replay server: " + e.getMessage());
         }
 
         try {
@@ -128,6 +136,14 @@ public final class RunGate {
             for (CassetteFrame frame : captured.frames()) {
                 writer.write(frame);
             }
+        }
+    }
+
+    private static void closeQuietly(HttpReplayServer server) {
+        try {
+            server.close();
+        } catch (RuntimeException ignored) {
+            // Best-effort close on a path that already has a more specific failure to report.
         }
     }
 

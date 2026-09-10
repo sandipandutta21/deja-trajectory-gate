@@ -328,8 +328,26 @@ Trajectory Gate also carries a smaller, exact conformance bar on top of both ben
 all 10 hand-authored comparison vectors in [`conformance/trajectory/`](conformance/trajectory/) —
 exact match, tolerated drift, drifted, reordered, duplicate calls, unordered ambiguity, subset,
 superset, replay-frontier, and threshold-boundary cases — produce tree-identical JSON reports in
-both TypeScript and Java, `npx vitest run` reports 201/201 passing, and `./gradlew build` is
-clean across all three Java modules (`deja-core`, `deja-junit5`, `cli`).
+both TypeScript and Java, `npx vitest run` passes in full, and `./gradlew build` is clean
+across all three Java modules (`deja-core`, `deja-junit5`, `cli`).
+
+## Limitations
+
+- **A passing gate means "matches the approved golden," not "is objectively correct."**
+  Trajectory Gate detects *behavioral divergence* from a trajectory a human already approved —
+  it has no independent notion of what the right answer is, and never claims to prove semantic
+  correctness on its own.
+- **The deterministic semantic tier is intentionally conservative, not infallible.** The
+  benchmark above documents its actual false-positive rate and the two specific kinds of case it
+  still can't safely catch (small numeric drift, opaque non-path identifiers) — that's a
+  deliberate, measured trade-off, not a hidden gap.
+- **An ambiguous match fails closed, it doesn't guess.** If two different recorded interactions
+  ever tie for the best qualifying score, replay treats that as no match at all rather than
+  arbitrarily picking one — ties don't occur in deja's own tested corpora, but the guarantee is
+  "never silently arbitrary," not "provably impossible."
+- **Trajectory Gate's own comparison never uses an LLM judge**, so a gate verdict is always
+  reproducible — but the optional judge on the *replay* side (an explicit, hand-written
+  opt-in with no CLI flag) is exactly as reliable as the judge you provide it.
 
 ## License
 

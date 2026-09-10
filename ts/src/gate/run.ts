@@ -34,7 +34,8 @@ export type GateFailureReasonCode =
     | "agent-exit-nonzero"
     | "capture-read-failed"
     | "no-capture"
-    | "update-write-failed";
+    | "update-write-failed"
+    | "cleanup-failed";
 
 export interface RunGateResult {
     exitCode: GateExitCode;
@@ -103,8 +104,15 @@ export async function runGate(goldenPath: string, command: string[], options: Ru
         return { exitCode: 3, reasonCode: "spawn-failed", reason: `Failed to spawn agent command: ${(err as Error).message}` };
     }
 
-    // Every exit path from here closes the listener and flushes the capture.
-    await handle.close();
+    // Every exit path from here closes the listener and flushes the capture -- but the close
+    // itself can throw (e.g. the capture tee's flush fails), so it's caught here rather than
+    // left to propagate uncaught past the cleanup below.
+    try {
+        await handle.close();
+    } catch (err) {
+        await unlink(capturePath).catch(() => {});
+        return { exitCode: 3, reasonCode: "cleanup-failed", reason: `Failed to close replay server: ${(err as Error).message}` };
+    }
 
     try {
         if (agentResult.timedOut) {
