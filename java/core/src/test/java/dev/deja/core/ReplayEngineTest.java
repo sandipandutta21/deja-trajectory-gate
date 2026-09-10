@@ -7,6 +7,7 @@ import dev.deja.core.cassette.JsonRpcMessage;
 import dev.deja.core.replay.ReplayEngine;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -44,6 +45,22 @@ class ReplayEngineTest {
     void dropsRequestsThatNeverReceivedARecordedResponse() {
         List<CassetteFrame> frames = List.of(frame(Direction.C2S, JsonRpcMessage.request(1, "tools/list", null)));
         assertThat(ReplayEngine.pairInteractions(frames)).isEmpty();
+    }
+
+    @Test
+    void findIncompleteRequestsSurfacesARequestThatNeverReceivedAResponse() {
+        List<CassetteFrame> frames = List.of(frame(Direction.C2S, JsonRpcMessage.request(1, "tools/list", null)));
+        List<CassetteFrame> incomplete = ReplayEngine.findIncompleteRequests(frames);
+        assertThat(incomplete).hasSize(1);
+        assertThat(incomplete.get(0).msg().method()).isEqualTo("tools/list");
+    }
+
+    @Test
+    void findIncompleteRequestsIsEmptyWhenEveryRequestGotAResponse() {
+        List<CassetteFrame> frames = List.of(
+                frame(Direction.C2S, JsonRpcMessage.request(1, "tools/list", null)),
+                frame(Direction.S2C, JsonRpcMessage.result(1, Map.of("tools", List.of()))));
+        assertThat(ReplayEngine.findIncompleteRequests(frames)).isEmpty();
     }
 
     @Test
@@ -116,6 +133,38 @@ class ReplayEngineTest {
     @Test
     void recordedInteractionCountReflectsTheNumberOfPairedInteractions() {
         assertThat(new ReplayEngine(fetchFixture()).recordedInteractionCount()).isEqualTo(1);
+    }
+
+    @Test
+    void incompleteInteractionCountReflectsRequestsThatNeverReceivedAResponse() {
+        List<CassetteFrame> withMiss = new ArrayList<>(fetchFixture());
+        withMiss.add(frame(Direction.C2S, JsonRpcMessage.request(2, "tools/list", null)));
+        ReplayEngine engine = new ReplayEngine(withMiss);
+        assertThat(engine.recordedInteractionCount()).isEqualTo(1);
+        assertThat(engine.incompleteInteractionCount()).isEqualTo(1);
+    }
+
+    @Test
+    void resolvesSeveralConcurrentRequestsAgainstAMultiInteractionCassetteCorrectly() {
+        List<CassetteFrame> multi = List.of(
+                frame(Direction.C2S, JsonRpcMessage.request(1, "tools/call", Map.of("name", "fetch", "url", "https://a.test"))),
+                frame(Direction.S2C, JsonRpcMessage.result(1, Map.of("page", "a"))),
+                frame(Direction.C2S, JsonRpcMessage.request(2, "tools/call", Map.of("name", "fetch", "url", "https://b.test"))),
+                frame(Direction.S2C, JsonRpcMessage.result(2, Map.of("page", "b"))),
+                frame(Direction.C2S, JsonRpcMessage.request(3, "tools/call", Map.of("name", "fetch", "url", "https://c.test"))),
+                frame(Direction.S2C, JsonRpcMessage.result(3, Map.of("page", "c"))));
+        ReplayEngine engine = new ReplayEngine(multi);
+
+        CompletableFuture<Optional<JsonRpcMessage>> fa = engine.resolve(JsonRpcMessage.request(10, "tools/call", Map.of("name", "fetch", "url", "https://a.test")));
+        CompletableFuture<Optional<JsonRpcMessage>> fb = engine.resolve(JsonRpcMessage.request(11, "tools/call", Map.of("name", "fetch", "url", "https://b.test")));
+        CompletableFuture<Optional<JsonRpcMessage>> fc = engine.resolve(JsonRpcMessage.request(12, "tools/call", Map.of("name", "fetch", "url", "https://c.test")));
+        CompletableFuture<Optional<JsonRpcMessage>> faAgain = engine.resolve(JsonRpcMessage.request(13, "tools/call", Map.of("name", "fetch", "url", "https://a.test")));
+        CompletableFuture.allOf(fa, fb, fc, faAgain).join();
+
+        assertThat(await(fa).get().result()).isEqualTo(Map.of("page", "a"));
+        assertThat(await(fb).get().result()).isEqualTo(Map.of("page", "b"));
+        assertThat(await(fc).get().result()).isEqualTo(Map.of("page", "c"));
+        assertThat(await(faAgain).get().result()).isEqualTo(Map.of("page", "a")); // stateless: resolvable again, concurrently
     }
 
     @Test

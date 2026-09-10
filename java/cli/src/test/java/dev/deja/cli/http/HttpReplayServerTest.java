@@ -67,6 +67,15 @@ class HttpReplayServerTest {
     }
 
     @Test
+    void responds413AndStopsReadingInsteadOfBufferingForeverForAnOversizedBody() throws Exception {
+        try (HttpReplayServer server = HttpReplayServer.start(writeGolden(), false, 0, null)) {
+            String oversized = "x".repeat(10 * 1024 * 1024 + 1);
+            HttpResponse<String> response = post(server.port(), oversized);
+            assertThat(response.statusCode()).isEqualTo(413);
+        }
+    }
+
+    @Test
     void rejectsGetWith405() throws Exception {
         try (HttpReplayServer server = HttpReplayServer.start(writeGolden(), false, 0, null)) {
             HttpRequest request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port())).GET().build();

@@ -198,6 +198,21 @@ function evaluatePolicy(
     return { reportVersion: 1, mode: "policy", threshold: DEFAULT_THRESHOLD, steps, session, summary };
 }
 
+/** Above this, `unordered`/`subset`/`superset` mode's per-group Hungarian assignment (O(n³) in
+ *  the size of the *largest same-(method,toolName) group*, not the trajectory as a whole) risks
+ *  hanging on a pathological input rather than failing fast. Real trajectories -- an agent's
+ *  actual tool calls in one run -- are tens to low hundreds of steps; this is headroom, not a
+ *  realistic ceiling anyone should ever hit. */
+const MAX_TRAJECTORY_STEPS = 5000;
+
+function checkTrajectorySize(golden: TrajectoryStep[], actual: TrajectoryStep[]): void {
+    if (golden.length > MAX_TRAJECTORY_STEPS || actual.length > MAX_TRAJECTORY_STEPS) {
+        throw new Error(
+            `Deja: trajectory too large to compare (golden ${golden.length} steps, actual ${actual.length} steps, max ${MAX_TRAJECTORY_STEPS} per side)`
+        );
+    }
+}
+
 /** Compares two already-extracted trajectories. `session` -- if the caller has
  *  divergence-frontier evidence (see `detectReplaySession`) -- tags post-divergence steps. */
 export function compareTrajectories(
@@ -206,6 +221,7 @@ export function compareTrajectories(
     options: TrajectoryCompareOptions = {},
     session?: TrajectorySession
 ): TrajectoryReport {
+    checkTrajectorySize(golden, actual);
     const mode = options.mode ?? "strict";
     const threshold = options.threshold ?? DEFAULT_THRESHOLD;
 

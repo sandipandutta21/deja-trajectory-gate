@@ -6,9 +6,9 @@ Hand-labeled corpus of 1733 JSON-RPC (recorded, incoming) pairs — 971 that sho
 
 | Matcher | Precision | Recall | False-positive rate | Avg. latency/call |
 |---|---:|---:|---:|---:|
-| Exact (naive JSON equality) | 100.0% | 20.0% | 0.0% | 2.67 µs |
-| Structural only (deja tier 1/2) | 100.0% | 51.7% | 0.0% | 11.56 µs |
-| Deja full pipeline (tier 1/2/3 + hard gates) | 91.6% | 98.8% | 11.5% | 17.67 µs |
+| Exact (naive JSON equality) | 100.0% | 20.0% | 0.0% | 1.89 µs |
+| Structural only (deja tier 1/2) | 100.0% | 51.7% | 0.0% | 7.53 µs |
+| Deja full pipeline (tier 1/2/3 + hard gates) | 91.6% | 98.8% | 11.5% | 13.99 µs |
 
 **Precision** = correct matches ÷ all matches made. **Recall** = correct matches ÷ cases that should have matched. **False-positive rate** = incorrect matches ÷ cases that should have been rejected — the number that matters most here: a wrong match means replaying the wrong tool's result, or (worse) nothing stopped a mutating call with the wrong arguments from looking "already handled."
 

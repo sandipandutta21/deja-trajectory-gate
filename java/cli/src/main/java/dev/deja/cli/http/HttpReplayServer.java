@@ -45,6 +45,33 @@ public final class HttpReplayServer implements AutoCloseable {
     private static final String SSE_CONTENT_TYPE = "text/event-stream";
     private static final String SESSION_HEADER = "mcp-session-id";
 
+    /** Generous for any real JSON-RPC/MCP payload; exists to bound worst-case memory growth
+     *  from a pathological or malicious body instead of buffering it in full. Mirrors the
+     *  TypeScript implementation's {@code body.ts} `MAX_BODY_BYTES`. */
+    private static final int MAX_BODY_BYTES = 10 * 1024 * 1024;
+
+    private static final class BodyTooLargeException extends IOException {
+        private static final long serialVersionUID = 1L;
+    }
+
+    /** Reads the request body up to {@code maxBytes}, throwing {@link BodyTooLargeException}
+     *  (rather than continuing to buffer) the moment that's exceeded -- unlike {@code
+     *  InputStream.readAllBytes()}, which has no such bound. */
+    private static byte[] readBoundedBody(java.io.InputStream in, int maxBytes) throws IOException {
+        java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+        byte[] chunk = new byte[8192];
+        int total = 0;
+        int n;
+        while ((n = in.read(chunk)) != -1) {
+            total += n;
+            if (total > maxBytes) {
+                throw new BodyTooLargeException();
+            }
+            buffer.write(chunk, 0, n);
+        }
+        return buffer.toByteArray();
+    }
+
     private final HttpServer server;
     private final ExecutorService executor;
     private final Capture capture;
@@ -111,9 +138,17 @@ public final class HttpReplayServer implements AutoCloseable {
                 return;
             }
 
+            byte[] requestBody;
+            try {
+                requestBody = readBoundedBody(exchange.getRequestBody(), MAX_BODY_BYTES);
+            } catch (BodyTooLargeException e) {
+                sendJson(exchange, 413, errorBody(-32600, "Deja: request body exceeds the " + MAX_BODY_BYTES + "-byte limit"));
+                return;
+            }
+
             JsonNode parsed;
             try {
-                parsed = Json.MAPPER.readTree(exchange.getRequestBody().readAllBytes());
+                parsed = Json.MAPPER.readTree(requestBody);
             } catch (Exception e) {
                 sendJson(exchange, 400, errorBody(-32700, "Deja: invalid JSON body"));
                 return;

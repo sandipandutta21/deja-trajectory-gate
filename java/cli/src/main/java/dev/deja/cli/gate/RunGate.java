@@ -41,12 +41,13 @@ public final class RunGate {
     public record Options(Integer port, CompareOptions compareOptions, Long timeoutMs, boolean update) {
     }
 
-    /** @param report  absent when a harness failure ({@code reason}) happened before a
-     *                 comparison was possible
-     *  @param reason  set only for harness failures ({@code exitCode == 3}) */
-    public record Result(int exitCode, TrajectoryReport report, String reason, boolean updated) {
-        static Result harnessFailure(String reason) {
-            return new Result(3, null, reason, false);
+    /** @param report     absent when a harness failure ({@code reason}) happened before a
+     *                    comparison was possible
+     *  @param reason     set only for harness failures ({@code exitCode == 3})
+     *  @param reasonCode set only for harness failures -- see {@link ReasonCode} */
+    public record Result(int exitCode, TrajectoryReport report, String reason, ReasonCode reasonCode, boolean updated) {
+        static Result harnessFailure(ReasonCode reasonCode, String reason) {
+            return new Result(3, null, reason, reasonCode, false);
         }
     }
 
@@ -55,7 +56,7 @@ public final class RunGate {
         try {
             golden = new CassetteReader(goldenPath).loadAll();
         } catch (RuntimeException e) {
-            return Result.harnessFailure("Unable to read golden cassette: " + e.getMessage());
+            return Result.harnessFailure(ReasonCode.GOLDEN_READ_FAILED, "Unable to read golden cassette: " + e.getMessage());
         }
 
         Path capturePath = Path.of(System.getProperty("java.io.tmpdir"), "deja-gate-" + UUID.randomUUID() + ".jsonl");
@@ -64,7 +65,7 @@ public final class RunGate {
         try {
             server = HttpReplayServer.start(goldenPath, false, options.port() != null ? options.port() : 0, capturePath);
         } catch (IOException e) {
-            return Result.harnessFailure("Replay server failed to start: " + e.getMessage());
+            return Result.harnessFailure(ReasonCode.SERVER_START_FAILED, "Replay server failed to start: " + e.getMessage());
         }
 
         Lifecycle.AgentRunResult agentResult;
@@ -72,7 +73,7 @@ public final class RunGate {
             agentResult = Lifecycle.runAgent(command, "http://127.0.0.1:" + server.port(), options.timeoutMs());
         } catch (IOException e) {
             deleteQuietly(capturePath);
-            return Result.harnessFailure("Failed to spawn agent command: " + e.getMessage());
+            return Result.harnessFailure(ReasonCode.SPAWN_FAILED, "Failed to spawn agent command: " + e.getMessage());
         } finally {
             // Every exit path from here closes the listener and flushes the capture.
             server.close();
@@ -80,32 +81,36 @@ public final class RunGate {
 
         try {
             if (agentResult.timedOut()) {
-                return Result.harnessFailure("Agent timed out after " + options.timeoutMs() + "ms; capture may be incomplete.");
+                return Result.harnessFailure(ReasonCode.TIMEOUT, "Agent timed out after " + options.timeoutMs() + "ms; capture may be incomplete.");
             }
             if (agentResult.exitCode() != 0) {
-                return Result.harnessFailure("Agent exited with code " + agentResult.exitCode() + ".");
+                return Result.harnessFailure(ReasonCode.AGENT_EXIT_NONZERO, "Agent exited with code " + agentResult.exitCode() + ".");
             }
 
             CassetteContents actual;
             try {
                 actual = new CassetteReader(capturePath).loadAll();
             } catch (RuntimeException e) {
-                return Result.harnessFailure("No usable capture: " + e.getMessage());
+                return Result.harnessFailure(ReasonCode.CAPTURE_READ_FAILED, "No usable capture: " + e.getMessage());
             }
 
             if (actual.frames().isEmpty()) {
-                return Result.harnessFailure("No frames captured -- the agent never connected to DEJA_MCP_URL.");
+                return Result.harnessFailure(ReasonCode.NO_CAPTURE, "No frames captured -- the agent never connected to DEJA_MCP_URL.");
             }
 
             TrajectoryReport report = Compare.compareCassetteFrames(golden.frames(), actual.frames(), options.compareOptions());
 
             boolean updated = false;
             if (options.update() && (report.session() == null || report.session().replayMisses() == 0)) {
-                promoteCapture(goldenPath, golden.header(), capturePath);
-                updated = true;
+                try {
+                    promoteCapture(goldenPath, golden.header(), capturePath);
+                    updated = true;
+                } catch (RuntimeException e) {
+                    return Result.harnessFailure(ReasonCode.UPDATE_WRITE_FAILED, "Failed to update golden cassette: " + e.getMessage());
+                }
             }
 
-            return new Result(report.summary().passed() ? 0 : 1, report, null, updated);
+            return new Result(report.summary().passed() ? 0 : 1, report, null, null, updated);
         } finally {
             deleteQuietly(capturePath);
         }

@@ -242,3 +242,42 @@ describe("compareTrajectories -- policy mode", () => {
         expect(() => compareTrajectories([], [], { mode: "policy" })).toThrow(/policy document/);
     });
 });
+
+describe("compareTrajectories -- input size guard", () => {
+    it("throws instead of attempting an oversized comparison", () => {
+        const big = Array.from({ length: 5001 }, (_, i) => step(i, "tools/call", "x"));
+        expect(() => compareTrajectories(big, [])).toThrow(/too large to compare/);
+    });
+
+    it("does not throw right at the boundary", () => {
+        // Distinct tool names per step -- Hungarian solves each same-(method,toolName) group
+        // independently, so this is 5000 trivial 1x1 assignments, not one 5000x5000 one.
+        const atLimit = Array.from({ length: 5000 }, (_, i) => step(i, "tools/call", `tool-${i}`));
+        expect(() => compareTrajectories(atLimit, atLimit, { mode: "unordered" })).not.toThrow();
+    });
+});
+
+describe("compareTrajectories -- no LLM judge is reachable", () => {
+    it("is fully synchronous -- structurally cannot await an async judge callback", () => {
+        const golden = [step(0, "tools/call", "search", { q: "a" })];
+        const actual = [step(0, "tools/call", "search", { q: "aa" })];
+        const result = compareTrajectories(golden, actual);
+        expect(typeof (result as unknown as { then?: unknown }).then).not.toBe("function");
+    });
+
+    it("never invokes a judge-shaped callback even if one is forced onto the options object", () => {
+        const golden = [step(0, "tools/call", "search", { q: "totally different query" })];
+        const actual = [step(0, "tools/call", "search", { q: "unrelated words entirely" })];
+        let judgeCalled = false;
+        const options = {
+            mode: "strict" as const,
+            judge: () => {
+                judgeCalled = true;
+                return { equivalent: true };
+            },
+        };
+
+        compareTrajectories(golden, actual, options);
+        expect(judgeCalled).toBe(false);
+    });
+});

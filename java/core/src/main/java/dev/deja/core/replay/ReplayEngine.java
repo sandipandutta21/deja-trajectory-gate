@@ -11,6 +11,7 @@ import dev.deja.core.match.SemanticMatchOptions;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -28,6 +29,7 @@ import java.util.stream.Collectors;
 public final class ReplayEngine {
 
     private final List<Interaction> interactions;
+    private final int incompleteCount;
     private final boolean semanticEnabled;
     private final SemanticConfig semanticConfig;
     private final boolean consumeOnce;
@@ -55,6 +57,7 @@ public final class ReplayEngine {
      */
     public ReplayEngine(List<CassetteFrame> frames, boolean semanticEnabled, SemanticConfig semanticConfig, boolean consumeOnce) {
         this.interactions = pairInteractions(frames);
+        this.incompleteCount = findIncompleteRequests(frames).size();
         this.semanticEnabled = semanticEnabled;
         this.semanticConfig = semanticConfig != null ? semanticConfig : SemanticConfig.builder().build();
         this.consumeOnce = consumeOnce;
@@ -81,6 +84,24 @@ public final class ReplayEngine {
         return pairs;
     }
 
+    /** Requests recorded in the cassette that never received a response -- these can never be
+     *  matched during replay (there's nothing to serve), but are surfaced separately rather
+     *  than silently discarded, so a caller can tell "this cassette is incomplete" from "this
+     *  cassette just didn't record much." */
+    public static List<CassetteFrame> findIncompleteRequests(List<CassetteFrame> frames) {
+        Map<Object, CassetteFrame> pending = new LinkedHashMap<>();
+
+        for (CassetteFrame frame : frames) {
+            if (frame.dir() == Direction.C2S && frame.msg().id() != null) {
+                pending.put(frame.msg().id(), frame);
+            } else if (frame.dir() == Direction.S2C && frame.msg().id() != null) {
+                pending.remove(frame.msg().id());
+            }
+        }
+
+        return new ArrayList<>(pending.values());
+    }
+
     /** Exported so a captured cassette can be scanned after the fact for replay-miss evidence
      *  (Trajectory Gate's divergence-frontier detection) without duplicating this literal. Kept
      *  for human-readable reports; detection itself keys off {@code NO_MATCH_ERROR_CODE}, not
@@ -101,6 +122,13 @@ public final class ReplayEngine {
 
     public int recordedInteractionCount() {
         return interactions.size();
+    }
+
+    /** Requests recorded in the cassette that never received a response -- see
+     *  {@link #findIncompleteRequests}. Diagnostic only: these were never matchable and
+     *  matching behavior is unaffected either way. */
+    public int incompleteInteractionCount() {
+        return incompleteCount;
     }
 
     /** Notifications (no id) never produce a response, matched or not -- that's per JSON-RPC

@@ -25,6 +25,24 @@ export function pairInteractions(frames: CassetteFrame[]): Interaction[] {
     return pairs;
 }
 
+/** Requests that never got a recorded response (e.g. the recording process was killed
+ *  mid-flight) -- these can never be matched during replay (there's nothing to serve), but are
+ *  surfaced separately rather than silently discarded, so a caller can tell "this cassette is
+ *  incomplete" from "this cassette just didn't record much." */
+export function findIncompleteRequests(frames: CassetteFrame[]): CassetteFrame[] {
+    const pending = new Map<string | number, CassetteFrame>();
+
+    for (const frame of frames) {
+        if (frame.dir === "c2s" && frame.msg.id !== undefined) {
+            pending.set(frame.msg.id, frame);
+        } else if (frame.dir === "s2c" && frame.msg.id !== undefined) {
+            pending.delete(frame.msg.id);
+        }
+    }
+
+    return [...pending.values()];
+}
+
 /** Exported so a captured cassette can be scanned after the fact for replay-miss evidence
  *  (e.g. trajectory's divergence-frontier detection) without duplicating this literal. Kept
  *  around for human-readable reports; detection itself keys off `NO_MATCH_ERROR_CODE`, not
@@ -74,6 +92,7 @@ export interface ReplayEngineOptions {
  */
 export class ReplayEngine {
     private readonly interactions: Interaction[];
+    private readonly incompleteCount: number;
     private readonly semanticEnabled: boolean;
     private readonly semanticConfig: SemanticConfig;
     private readonly consumeOnce: boolean;
@@ -81,6 +100,7 @@ export class ReplayEngine {
 
     constructor(options: ReplayEngineOptions) {
         this.interactions = pairInteractions(options.frames);
+        this.incompleteCount = findIncompleteRequests(options.frames).length;
         this.semanticEnabled = !!options.semantic;
         this.semanticConfig = typeof options.semantic === "object" ? options.semantic : {};
         this.consumeOnce = !!options.consumeOnce;
@@ -88,6 +108,13 @@ export class ReplayEngine {
 
     get recordedInteractionCount(): number {
         return this.interactions.length;
+    }
+
+    /** Requests recorded in the cassette that never received a response -- see
+     *  `findIncompleteRequests`. Diagnostic only: these were never matchable and matching
+     *  behavior is unaffected either way. */
+    get incompleteInteractionCount(): number {
+        return this.incompleteCount;
     }
 
     /** Notifications (no `id`) never produce a response, matched or not -- that's per JSON-RPC 2.0. */

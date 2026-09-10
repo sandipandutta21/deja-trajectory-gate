@@ -11,7 +11,7 @@ Cases by mode: `policy`: 200, `strict`: 910, `subset`: 100, `superset`: 200, `un
 | Precision (of trajectories the gate passed, how many were genuinely fine) | 100.0% |
 | Recall (of genuinely fine trajectories, how many the gate correctly passed) | 98.9% |
 | False-positive rate (of genuine divergences, how many the gate silently passed) | 0.0% |
-| Avg. latency per `compareTrajectories` call | 74.18 µs |
+| Avg. latency per `compareTrajectories` call | 46.29 µs |
 
 **False-positive rate is the number that matters most here**: it's the fraction of genuine behavioral divergences (a dropped call, a swapped tool, a 10x change to a money transfer, a prohibited call) that the gate let through as "passed" anyway -- a regression that ships to CI with no red flag. A false alarm (the other kind of mistake, counted in recall) costs a few minutes rerunning a gate on a benign variation; a false positive here costs a silent regression.
 

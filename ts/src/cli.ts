@@ -287,7 +287,7 @@ async function main(): Promise<void> {
                 console.log(values.json ? toCanonicalJson(result.report) : renderHumanReport(result.report, goldenPath));
                 if (result.updated) console.log("Deja: golden cassette updated with the captured session.");
             } else if (values.json) {
-                console.log(JSON.stringify({ verdict: "error", reason: result.reason, exitCode: result.exitCode }));
+                console.log(JSON.stringify({ verdict: "error", reasonCode: result.reasonCode, reason: result.reason, exitCode: result.exitCode }));
             } else {
                 console.error(`Deja gate: harness failure -- ${result.reason}`);
             }

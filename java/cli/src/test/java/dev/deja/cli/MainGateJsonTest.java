@@ -69,7 +69,48 @@ class MainGateJsonTest {
         assertThat(exitCode).isEqualTo(3);
         JsonNode node = Json.MAPPER.readTree(stdout);
         assertThat(node.get("verdict").asText()).isEqualTo("error");
+        assertThat(node.get("reasonCode").asText()).isEqualTo("agent-exit-nonzero");
         assertThat(node.get("reason").asText()).contains("exited with code 7");
         assertThat(node.get("exitCode").asInt()).isEqualTo(3);
+    }
+
+    @Test
+    @Timeout(30)
+    void validatesModeBeforeSpawningTheAgent() throws Exception {
+        Path golden = writeGolden();
+        // An agent command that's guaranteed to fail to spawn: if validation happened *after*
+        // attempting to spawn it, this would exit 3 (harness failure) instead of 2.
+        List<String> command = new java.util.ArrayList<>(javaCommand("dev.deja.cli.Main", "gate", golden.toString(), "--mode", "bogus-mode"));
+        command.add("--");
+        command.add("definitely-not-a-real-binary-xyz");
+
+        Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
+        int exitCode = process.waitFor();
+
+        assertThat(exitCode).isEqualTo(2);
+    }
+
+    @Test
+    @Timeout(30)
+    void terminatingDejaGateForwardsToTheAgentInsteadOfOrphaningIt() throws Exception {
+        Path golden = writeGolden();
+
+        List<String> command = new java.util.ArrayList<>(javaCommand("dev.deja.cli.Main", "gate", golden.toString()));
+        command.add("--");
+        command.addAll(javaCommand("dev.deja.cli.FixtureAgentMain", "hanging"));
+
+        Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
+        // Give it a moment to actually start the replay server and spawn the agent.
+        Thread.sleep(1000);
+        List<ProcessHandle> descendants = process.toHandle().descendants().toList();
+        assertThat(descendants).isNotEmpty(); // the FixtureAgentMain JVM should be running by now
+        ProcessHandle agentHandle = descendants.get(0);
+
+        process.destroy(); // SIGTERM-equivalent -- triggers Lifecycle's shutdown hook
+        assertThat(process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+
+        // Give the forwarded signal a brief moment to actually take effect.
+        Thread.sleep(500);
+        assertThat(agentHandle.isAlive()).isFalse();
     }
 }

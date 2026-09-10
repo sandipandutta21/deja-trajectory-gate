@@ -36,3 +36,45 @@ jobs:
       # the exact `deja gate` workflow the README documents -- not a mocked stand-in for it.
       - name: Dogfood deja gate
         run: node dist/cli.js gate examples/gate-dogfood/golden.jsonl -- node examples/gate-dogfood/agent.cjs
+
+      # Loose regression gate on both benchmarks (not a strict any-change gate -- see
+      # benchmarks/run.mjs and benchmarks/trajectory-run.mjs for exactly what "regression" means
+      # here): fails only if a false-positive rate rises or precision/recall drops materially.
+      - name: Benchmark regression check
+        run: npm run benchmark -- --check && npm run benchmark:trajectory -- --check
+
+  java:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: java
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Runs the full Gradle build across all three modules (deja-core, deja-junit5, cli),
+      # including TrajectoryConformanceTest against the committed conformance/trajectory/*
+      # fixtures (produced by ts/scripts/generate-trajectory-conformance.mjs) -- this is what
+      # actually makes cross-language conformance a CI gate, not just a manually-remembered step.
+      - name: Build and test
+        run: ./gradlew build
+
+      - name: Install the Java CLI
+        run: ./gradlew :cli:installDist
+
+      # Cross-runtime interop, not just "both languages pass their own tests": the Java CLI
+      # spawns the same Node.js agent script the TS job's own dogfood step runs, against the
+      # same golden cassette.
+      - name: Dogfood deja gate (Java CLI, TS-authored fixture)
+        run: cli/build/install/cli/bin/cli gate ../ts/examples/gate-dogfood/golden.jsonl -- node ../ts/examples/gate-dogfood/agent.cjs

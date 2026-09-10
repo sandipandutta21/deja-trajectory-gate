@@ -22,12 +22,28 @@ export interface RunGateOptions {
  *  harness/runtime failure. */
 export type GateExitCode = 0 | 1 | 3;
 
+/** Stable, machine-checkable identifier for *why* a harness failure happened -- so a CI
+ *  consumer can branch on this instead of substring-matching `reason`'s free text, the same
+ *  anti-pattern the no-match sentinel's error code already fixed on the replay side. One value
+ *  per failure site in `runGate` below. */
+export type GateFailureReasonCode =
+    | "golden-read-failed"
+    | "server-start-failed"
+    | "spawn-failed"
+    | "timeout"
+    | "agent-exit-nonzero"
+    | "capture-read-failed"
+    | "no-capture"
+    | "update-write-failed";
+
 export interface RunGateResult {
     exitCode: GateExitCode;
     /** Absent when a harness failure (`reason`) happened before a comparison was possible. */
     report?: TrajectoryReport;
     /** Set only for harness failures (`exitCode: 3`) -- explains why, for the human/JSON report. */
     reason?: string;
+    /** Set only for harness failures -- see `GateFailureReasonCode`. */
+    reasonCode?: GateFailureReasonCode;
     updated?: boolean;
 }
 
@@ -65,7 +81,7 @@ export async function runGate(goldenPath: string, command: string[], options: Ru
     try {
         ({ header, frames: goldenFrames } = await new CassetteReader(goldenPath).loadAll());
     } catch (err) {
-        return { exitCode: 3, reason: `Unable to read golden cassette: ${(err as Error).message}` };
+        return { exitCode: 3, reasonCode: "golden-read-failed", reason: `Unable to read golden cassette: ${(err as Error).message}` };
     }
 
     const capturePath = resolve(tmpdir(), `deja-gate-${randomUUID()}.jsonl`);
@@ -74,7 +90,7 @@ export async function runGate(goldenPath: string, command: string[], options: Ru
     try {
         handle = await startHttpReplayServer(goldenPath, { port: options.port, capture: capturePath });
     } catch (err) {
-        return { exitCode: 3, reason: `Replay server failed to start: ${(err as Error).message}` };
+        return { exitCode: 3, reasonCode: "server-start-failed", reason: `Replay server failed to start: ${(err as Error).message}` };
     }
 
     let agentResult;
@@ -84,7 +100,7 @@ export async function runGate(goldenPath: string, command: string[], options: Ru
     } catch (err) {
         await handle.close();
         await unlink(capturePath).catch(() => {});
-        return { exitCode: 3, reason: `Failed to spawn agent command: ${(err as Error).message}` };
+        return { exitCode: 3, reasonCode: "spawn-failed", reason: `Failed to spawn agent command: ${(err as Error).message}` };
     }
 
     // Every exit path from here closes the listener and flushes the capture.
@@ -92,22 +108,22 @@ export async function runGate(goldenPath: string, command: string[], options: Ru
 
     try {
         if (agentResult.timedOut) {
-            return { exitCode: 3, reason: `Agent timed out after ${options.timeoutMs}ms; capture may be incomplete.` };
+            return { exitCode: 3, reasonCode: "timeout", reason: `Agent timed out after ${options.timeoutMs}ms; capture may be incomplete.` };
         }
         if (agentResult.exitCode !== 0) {
             const signalNote = agentResult.signal ? ` (signal ${agentResult.signal})` : "";
-            return { exitCode: 3, reason: `Agent exited with code ${agentResult.exitCode}${signalNote}.` };
+            return { exitCode: 3, reasonCode: "agent-exit-nonzero", reason: `Agent exited with code ${agentResult.exitCode}${signalNote}.` };
         }
 
         let actualFrames;
         try {
             ({ frames: actualFrames } = await new CassetteReader(capturePath).loadAll());
         } catch (err) {
-            return { exitCode: 3, reason: `No usable capture: ${(err as Error).message}` };
+            return { exitCode: 3, reasonCode: "capture-read-failed", reason: `No usable capture: ${(err as Error).message}` };
         }
 
         if (actualFrames.length === 0) {
-            return { exitCode: 3, reason: "No frames captured -- the agent never connected to DEJA_MCP_URL." };
+            return { exitCode: 3, reasonCode: "no-capture", reason: "No frames captured -- the agent never connected to DEJA_MCP_URL." };
         }
 
         const report = compareCassetteFrames(goldenFrames, actualFrames, {
@@ -118,8 +134,12 @@ export async function runGate(goldenPath: string, command: string[], options: Ru
 
         let updated = false;
         if (options.update && (report.session?.replayMisses ?? 0) === 0) {
-            await promoteCapture(goldenPath, header, capturePath);
-            updated = true;
+            try {
+                await promoteCapture(goldenPath, header, capturePath);
+                updated = true;
+            } catch (err) {
+                return { exitCode: 3, reasonCode: "update-write-failed", reason: `Failed to update golden cassette: ${(err as Error).message}` };
+            }
         }
 
         return { exitCode: report.summary.passed ? 0 : 1, report, updated };

@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { CassetteWriter } from "../../../src/core/cassette.js";
 import { extractJsonRpcFromSse } from "../../../src/transport/http/sse.js";
 import { startHttpReplayServer, HttpReplayHandle } from "../../../src/transport/http/server.js";
+import { MAX_BODY_BYTES } from "../../../src/transport/http/body.js";
 import { CassetteLine } from "../../../src/core/types.js";
 
 const testDir = resolve(process.cwd(), ".tmp-http-server-test");
@@ -136,6 +137,16 @@ describe("startHttpReplayServer", () => {
       body: "{not valid json",
     });
     expect(res.status).toBe(400);
+  });
+
+  it("responds 413 and stops reading, instead of buffering forever, for a body over the size limit", async () => {
+    const oversized = "x".repeat(MAX_BODY_BYTES + 1);
+    const res = await fetch(`http://localhost:${handle.port}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: oversized,
+    });
+    expect(res.status).toBe(413);
   });
 
   it("streams the response as SSE when the client only accepts text/event-stream", async () => {

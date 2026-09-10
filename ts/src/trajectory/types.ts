@@ -100,6 +100,13 @@ export interface TrajectoryPolicy {
     closedWorld?: boolean;
 }
 
+/**
+ * Deliberately has no `judge` field: trajectory comparison (`deja trajectory`/`deja gate`) is
+ * fully deterministic by construction, not merely "off by default." An LLM judge only exists on
+ * the replay side (`ReplayEngineOptions.semantic.judge`, deciding what response to serve for one
+ * request) and requires a caller to hand-write and pass in their own callback -- an explicit
+ * opt-in with no CLI surface. A gate verdict can never be influenced by one.
+ */
 export interface TrajectoryCompareOptions {
     mode?: TrajectoryMode;
     /** Minimum deterministic similarity score to accept a sequence-mode match. Default 0.75.

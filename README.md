@@ -37,9 +37,13 @@ record/replay tools solve the opposite half: they can replay an identical client
 — no trajectory comparison, no CI gate.
 
 Trajectory Gate does both, from one artifact: capture the MCP wire once, replay that frozen world
-for a changed agent, then align and gate the trajectory it actually produced. Comparison is
-deterministic by default — no LLM judge required, no vendor owns what "equivalent" means — with
-an optional judge only as a tiebreaker inside a narrow uncertainty band.
+for a changed agent, then align and gate the trajectory it actually produced. The gate verdict
+itself is deterministic by construction, not just by default — `deja trajectory`/`deja gate`
+have no judge parameter at all, so no vendor owns what "equivalent" means and a CI run can never
+flake on an LLM call. The *replay* layer underneath (deciding what response to serve for one
+request) separately supports an optional, bring-your-own judge as a tiebreaker inside a narrow
+uncertainty band — but that's opt-in library code a caller writes themselves, with no CLI flag,
+and it can't reach a gate's pass/fail decision either way.
 
 That replay still has to survive a non-deterministic client: the same *intent* ("read this
 file") can arrive as structurally different JSON-RPC calls between runs. A naive VCR either

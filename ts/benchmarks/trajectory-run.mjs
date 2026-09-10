@@ -159,6 +159,31 @@ console.log(
         `disagreements=${results.disagreements.length}/${corpus.length}`
 );
 
+// Loose regression gate, not a strict any-change gate -- see run.mjs's identical mechanism for
+// the matching benchmark. A false-positive-rate *increase* here means a genuine behavioral
+// regression started silently passing the gate, which is always worth failing CI over.
+const REGRESSION_BASELINE = { falsePositiveRate: 0, precision: 1.0, recall: 0.989 };
+const REGRESSION_TOLERANCE = 0.01;
+const FPR_TOLERANCE = 0.005;
+
+if (process.argv.includes("--check")) {
+    const problems = [];
+    if (results.fpr > REGRESSION_BASELINE.falsePositiveRate + FPR_TOLERANCE) {
+        problems.push(`false-positive rate rose to ${pct(results.fpr)} (baseline ${pct(REGRESSION_BASELINE.falsePositiveRate)})`);
+    }
+    if (results.precision < REGRESSION_BASELINE.precision - REGRESSION_TOLERANCE) {
+        problems.push(`precision dropped to ${pct(results.precision)} (baseline ${pct(REGRESSION_BASELINE.precision)})`);
+    }
+    if (results.recall < REGRESSION_BASELINE.recall - REGRESSION_TOLERANCE) {
+        problems.push(`recall dropped to ${pct(results.recall)} (baseline ${pct(REGRESSION_BASELINE.recall)})`);
+    }
+    if (problems.length > 0) {
+        console.error(`\nBenchmark regression:\n${problems.map((p) => `  - ${p}`).join("\n")}`);
+        process.exit(1);
+    }
+    console.log("\nBenchmark regression check passed.");
+}
+
 const report = buildReport(results);
 writeFileSync(join(__dirname, "TRAJECTORY-RESULTS.md"), report + "\n");
 console.log(`\nWrote ${join(__dirname, "TRAJECTORY-RESULTS.md")}`);

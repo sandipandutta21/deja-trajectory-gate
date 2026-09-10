@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { existsSync } from "node:fs";
-import { mkdir, rm } from "node:fs/promises";
+import { chmod, mkdir, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { CassetteReader, CassetteWriter } from "../../src/core/cassette.js";
 import { runGate } from "../../src/gate/run.js";
@@ -83,6 +83,7 @@ describe("runGate", () => {
         expect(result.exitCode).toBe(3);
         expect(result.report).toBeUndefined();
         expect(result.reason).toContain("exited with code 7");
+        expect(result.reasonCode).toBe("agent-exit-nonzero");
     });
 
     it("times out, kills the agent, and reports a harness failure (exit 3)", async () => {
@@ -92,6 +93,7 @@ describe("runGate", () => {
 
         expect(result.exitCode).toBe(3);
         expect(result.reason).toContain("timed out");
+        expect(result.reasonCode).toBe("timeout");
         // Proves the agent was actually killed rather than this test just waiting the full 5s.
         expect(Date.now() - start).toBeLessThan(4000);
     }, 10000);
@@ -118,4 +120,24 @@ describe("runGate", () => {
         const { frames } = await new CassetteReader(golden).loadAll();
         expect(frames.find((f) => f.dir === "s2c")?.msg.result).toEqual({ tools: [] });
     });
+
+    // Windows' chmod doesn't reliably block a write the way POSIX permissions do (the file's
+    // owning process can often still overwrite a "read-only"-attributed file) -- this is a real
+    // test on Linux/macOS, including the Linux CI runner this repo actually gates on, but not
+    // reproducible on this dev machine.
+    it.skipIf(process.platform === "win32")(
+        "--update fails cleanly (not an unhandled rejection) when the golden file can't be written",
+        async () => {
+            const golden = await writeGolden("update-write-failure.jsonl");
+            await chmod(golden, 0o444); // read-only, so promoteCapture's rewrite fails
+            try {
+                const result = await runGate(golden, happyAgent, { update: true });
+                expect(result.exitCode).toBe(3);
+                expect(result.reasonCode).toBe("update-write-failed");
+                expect(result.reason).toContain("Failed to update golden cassette");
+            } finally {
+                await chmod(golden, 0o644); // restore so afterAll's rm() can clean up testDir
+            }
+        }
+    );
 });

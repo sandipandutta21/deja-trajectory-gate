@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildNoMatchError, normalizeIncoming, pairInteractions, ReplayEngine, resolveBatch } from "../../src/core/replayEngine.js";
+import { buildNoMatchError, findIncompleteRequests, normalizeIncoming, pairInteractions, ReplayEngine, resolveBatch } from "../../src/core/replayEngine.js";
 import { CassetteFrame, JsonRpcMessage } from "../../src/core/types.js";
 
 function frame(dir: "c2s" | "s2c", msg: JsonRpcMessage, t_ms = 0): CassetteFrame {
@@ -21,6 +21,23 @@ describe("pairInteractions", () => {
   it("drops requests that never received a recorded response", () => {
     const frames = [frame("c2s", { jsonrpc: "2.0", id: 1, method: "tools/list" })];
     expect(pairInteractions(frames)).toHaveLength(0);
+  });
+});
+
+describe("findIncompleteRequests", () => {
+  it("surfaces a request that never received a recorded response", () => {
+    const frames = [frame("c2s", { jsonrpc: "2.0", id: 1, method: "tools/list" })];
+    const incomplete = findIncompleteRequests(frames);
+    expect(incomplete).toHaveLength(1);
+    expect(incomplete[0].msg.method).toBe("tools/list");
+  });
+
+  it("is empty when every request got a recorded response", () => {
+    const frames = [
+      frame("c2s", { jsonrpc: "2.0", id: 1, method: "tools/list" }),
+      frame("s2c", { jsonrpc: "2.0", id: 1, result: { tools: [] } }),
+    ];
+    expect(findIncompleteRequests(frames)).toHaveLength(0);
   });
 
   it("ignores notifications (no id) on both sides", () => {
@@ -102,6 +119,37 @@ describe("ReplayEngine", () => {
   it("recordedInteractionCount reflects the number of paired interactions", () => {
     const engine = new ReplayEngine({ frames });
     expect(engine.recordedInteractionCount).toBe(1);
+  });
+
+  it("incompleteInteractionCount reflects requests that never received a recorded response", () => {
+    const withMiss = [...frames, frame("c2s", { jsonrpc: "2.0", id: 2, method: "tools/list" })];
+    const engine = new ReplayEngine({ frames: withMiss });
+    expect(engine.recordedInteractionCount).toBe(1);
+    expect(engine.incompleteInteractionCount).toBe(1);
+  });
+
+  it("resolves several concurrent requests against a multi-interaction cassette correctly (default stateless mode)", async () => {
+    const multi = [
+      frame("c2s", { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "fetch", url: "https://a.test" } }),
+      frame("s2c", { jsonrpc: "2.0", id: 1, result: { page: "a" } }),
+      frame("c2s", { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "fetch", url: "https://b.test" } }),
+      frame("s2c", { jsonrpc: "2.0", id: 2, result: { page: "b" } }),
+      frame("c2s", { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "fetch", url: "https://c.test" } }),
+      frame("s2c", { jsonrpc: "2.0", id: 3, result: { page: "c" } }),
+    ];
+    const engine = new ReplayEngine({ frames: multi });
+
+    const [a, b, c, aAgain] = await Promise.all([
+      engine.resolve({ jsonrpc: "2.0", id: 10, method: "tools/call", params: { name: "fetch", url: "https://a.test" } }),
+      engine.resolve({ jsonrpc: "2.0", id: 11, method: "tools/call", params: { name: "fetch", url: "https://b.test" } }),
+      engine.resolve({ jsonrpc: "2.0", id: 12, method: "tools/call", params: { name: "fetch", url: "https://c.test" } }),
+      engine.resolve({ jsonrpc: "2.0", id: 13, method: "tools/call", params: { name: "fetch", url: "https://a.test" } }),
+    ]);
+
+    expect(a?.result).toEqual({ page: "a" });
+    expect(b?.result).toEqual({ page: "b" });
+    expect(c?.result).toEqual({ page: "c" });
+    expect(aAgain?.result).toEqual({ page: "a" }); // stateless: still resolvable a second time, concurrently
   });
 
   describe("consumeOnce", () => {

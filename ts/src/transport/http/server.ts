@@ -96,9 +96,17 @@ export async function startHttpReplayServer(cassettePath: string, options: Repla
                 return;
             }
 
+            let rawBody: Buffer;
+            try {
+                rawBody = await readRawBody(req);
+            } catch (err) {
+                sendJson(res, 413, { jsonrpc: "2.0", error: { code: -32600, message: (err as Error).message } });
+                return;
+            }
+
             let parsed: unknown;
             try {
-                parsed = JSON.parse((await readRawBody(req)).toString("utf8"));
+                parsed = JSON.parse(rawBody.toString("utf8"));
             } catch {
                 sendJson(res, 400, { jsonrpc: "2.0", error: { code: -32700, message: "Deja: invalid JSON body" } });
                 return;

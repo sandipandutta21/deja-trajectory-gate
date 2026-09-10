@@ -172,11 +172,26 @@ public class Compare {
         return new TrajectoryReport(TrajectoryReport.CURRENT_VERSION, TrajectoryMode.POLICY, CompareOptions.DEFAULT_THRESHOLD, steps, session, counts.toSummary());
     }
 
+    /** Above this, {@code unordered}/{@code subset}/{@code superset} mode's per-group Hungarian
+     *  assignment (O(n<sup>3</sup>) in the size of the *largest same-(method,toolName) group*,
+     *  not the trajectory as a whole) risks hanging on a pathological input rather than failing
+     *  fast. Real trajectories -- an agent's actual tool calls in one run -- are tens to low
+     *  hundreds of steps; this is headroom, not a realistic ceiling anyone should ever hit. */
+    private static final int MAX_TRAJECTORY_STEPS = 5000;
+
+    private static void checkTrajectorySize(List<TrajectoryStep> golden, List<TrajectoryStep> actual) {
+        if (golden.size() > MAX_TRAJECTORY_STEPS || actual.size() > MAX_TRAJECTORY_STEPS) {
+            throw new IllegalArgumentException("Deja: trajectory too large to compare (golden " + golden.size()
+                    + " steps, actual " + actual.size() + " steps, max " + MAX_TRAJECTORY_STEPS + " per side)");
+        }
+    }
+
     /** Compares two already-extracted trajectories. {@code session} -- if the caller has
      *  divergence-frontier evidence (see {@link Frontier#detectReplaySession}) -- tags
      *  post-divergence steps. */
     public TrajectoryReport compareTrajectories(
             List<TrajectoryStep> golden, List<TrajectoryStep> actual, CompareOptions options, TrajectorySession session) {
+        checkTrajectorySize(golden, actual);
         TrajectoryMode mode = options.modeOrDefault();
         double threshold = options.thresholdOrDefault();
 

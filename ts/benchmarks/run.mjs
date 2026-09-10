@@ -199,6 +199,38 @@ for (const [matcher, r] of results) {
     );
 }
 
+// Loose regression gate, not a strict any-change gate: last-known-good numbers for the full
+// pipeline (the only matcher anyone would actually ship). A false-positive-rate *increase* is
+// always a regression -- that's the number a wrong match actually costs. Precision/recall get
+// a small tolerance band since those can wobble slightly without anything having gotten less
+// safe. Deliberately not run by default -- pass `--check` (e.g. `npm run benchmark -- --check`)
+// to enable it; see the CI workflow's own step for exactly that invocation.
+const REGRESSION_BASELINE = { falsePositiveRate: 0.115, precision: 0.916, recall: 0.988 };
+const REGRESSION_TOLERANCE = 0.01;
+// The baseline above is the README's rounded display value, not the exact fraction (currently
+// ~0.1155, not 0.115) -- a tiny tolerance absorbs that rounding without hiding a real
+// regression, which would move this by far more than half a percentage point.
+const FPR_TOLERANCE = 0.005;
+
+if (process.argv.includes("--check")) {
+    const full = results.find(([m]) => m.key === "full")[1];
+    const problems = [];
+    if (full.fpr > REGRESSION_BASELINE.falsePositiveRate + FPR_TOLERANCE) {
+        problems.push(`false-positive rate rose to ${pct(full.fpr)} (baseline ${pct(REGRESSION_BASELINE.falsePositiveRate)})`);
+    }
+    if (full.precision < REGRESSION_BASELINE.precision - REGRESSION_TOLERANCE) {
+        problems.push(`precision dropped to ${pct(full.precision)} (baseline ${pct(REGRESSION_BASELINE.precision)})`);
+    }
+    if (full.recall < REGRESSION_BASELINE.recall - REGRESSION_TOLERANCE) {
+        problems.push(`recall dropped to ${pct(full.recall)} (baseline ${pct(REGRESSION_BASELINE.recall)})`);
+    }
+    if (problems.length > 0) {
+        console.error(`\nBenchmark regression:\n${problems.map((p) => `  - ${p}`).join("\n")}`);
+        process.exit(1);
+    }
+    console.log("\nBenchmark regression check passed.");
+}
+
 const report = buildReport(results);
 writeFileSync(join(__dirname, "RESULTS.md"), report + "\n");
 console.log(`\nWrote ${join(__dirname, "RESULTS.md")}`);
